@@ -81,7 +81,7 @@ llava_nav/pretrain_src/
 llava_nav/bert_config/
 llava_nav/vlnce_baselines/
 
-*.mp4
+
 *.hdf5
 
 llava_nav/vlnce_baselines
