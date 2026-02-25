@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Taga-VLM: 项目主页</title>
+    <title>TagaVLM: Topology-Aware Global Action Reasoning for Vision-Language Navigation</title>
     <style>
         /* 这是一个简单的学术风格 CSS 样式 */
         body {
@@ -78,22 +78,22 @@
             <span><strong>Baocai Yin</strong><sup>1</sup></span>
             <br>
             <span style="font-size: 0.9em; font-weight: normal;">
-                <sup>1</sup>Beijing University of Technology, <sup>2</sup>Other Institute
+                <sup>1</sup>Beijing University of Technology, <sup>2</sup>Beijing University of Technology
             </span>
         </div>
 
-        <h2>Abstract (摘要)</h2>
+        <h2>Abstract</h2>
         <div class="abstract-text">
             <p>
                 Vision-Language Navigation (VLN) presents a unique challenge for Large Vision-Language Models (VLMs) due to their inherent architectural mismatch: VLMs are primarily pretrained on static, disembodied vision-language tasks, which fundamentally clash with the dynamic, embodied, and spatially-structured nature of navigation. Existing large-model-based methods often resort to converting rich visual and spatial information into text, forcing models to implicitly infer complex visual-topological relationships or limiting their global action capabilities. To bridge this gap, we propose Topology-Aware Global Action reasoning, an end-to-end framework that explicitly injects topological structures into the VLM backbone. To introduce topological edge information, Spatial Topology Aware Residual Attention (STAR-Att) directly integrates it into the VLM's self-attention mechanism, enabling intrinsic spatial reasoning while preserving pretrained knowledge. To enhance topological node information, an Interleaved Navigation Prompt strengthens node-level visual-text alignment. Finally, with the embedded topological graph, the model is capable of global action reasoning, allowing for robust path correction. On the R2R benchmark, \method achieves state-of-the-art performance among large-model-based methods, with a Success Rate (SR) of 51.09\% and SPL of 47.18 in unseen environments, outperforming prior work by 3.39\% in SR and 9.08 in SPL. This demonstrates that, for embodied spatial reasoning, targeted enhancements on smaller open-source VLMs can be more effective than brute-force model scaling. The code will be released upon publication.
             </p>
         </div>
 
-        <h2>Method Architecture (架构图)</h2>
+        <h2>Method Architecture</h2>
         <img src="framework.png" alt="Model Architecture">
-        <p class="teaser-caption">Figure 1: Overview of the Taga-VLM framework.</p>
+        <p class="teaser-caption">Figure 1: Overview of the TagaVLM. The pretrained observation encoder and projector encode RGB observations from each node to the semantic space. Textual information containing navigation system prompts and navigation observation descriptions passes through embedding layers to obtain text embedding sequences. The observation feature sequences from each node are inserted into the text embedding sequences according to the corresponding \texttt{<image>} placeholder positions in the navigation observation descriptions, resulting in Interleaved Navigation Prompt Input. The LLM backbone is optimized with STAR-Att, enforcing the awareness of edge-level relationships by node pairwise distance matrices. Finally, the decisions are made in a global action space to guide the agent to move to the target node.</p>
 
-        <h2>Demo Video (演示)</h2>
+        <h2>Demo Video</h2>
         <p style="text-align: center;">Here shows the real-time performance of our model.</p>
         
         <video controls width="100%">
