@@ -2,6 +2,8 @@
 
 This is the official implementation of the paper **"TagaVLM: Topology-Aware Global Action Reasoning for Vision-Language Navigation"**.
 
+![TagaVLM Framework](assets/framework.png)
+
 ## 🏠 Abstract
 
 Vision-Language Navigation (VLN) presents a
