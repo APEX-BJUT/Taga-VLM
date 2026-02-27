@@ -4,24 +4,34 @@ This is the official implementation of the paper **"TagaVLM: Topology-Aware Glob
 
 ## 🏠 Abstract
 
-<!-- Vision-Language Navigation (VLN) presents a unique challenge for Large Vision-Language Models (VLMs) due to their inherent architectural mismatch: VLMs are primarily pretrained on static, disembodied vision-language tasks, which fundamentally clash with the dynamic, embodied, and spatially-structured nature of navigation.
-
-To bridge this gap, we propose **TagaVLM** (Topology-Aware Global Action reasoning), an end-to-end framework that explicitly injects topological structures into the VLM backbone.
-
-* 
-**STAR-Att:** To introduce topological edge information, Spatial Topology Aware Residual Attention (STAR-Att) directly integrates it into the VLM's self-attention mechanism, enabling intrinsic spatial reasoning while preserving pretrained knowledge.
-
-
-* 
-**Interleaved Navigation Prompt:** To enhance topological node information, an Interleaved Navigation Prompt strengthens node-level visual-text alignment.
-
-
-* 
-**Global Action:** With the embedded topological graph, the model is capable of global action reasoning, allowing for robust path correction.
-
-
-
-On the R2R benchmark, TagaVLM achieves state-of-the-art performance among large-model-based methods, with a Success Rate (SR) of **51.09%** and SPL of **47.18** in unseen environments. -->
+Vision-Language Navigation (VLN) presents a
+unique challenge for Large Vision-Language Models (VLMs)
+due to their inherent architectural mismatch: VLMs are
+primarily pretrained on static, disembodied vision-language
+tasks, which fundamentally clash with the dynamic, embodied,
+and spatially-structured nature of navigation. Existing large-
+model-based methods often resort to converting rich visual
+and spatial information into text, forcing models to implicitly
+infer complex visual-topological relationships or limiting their
+global action capabilities. To bridge this gap, we propose
+TagaVLM (Topology-Aware Global Action reasoning), an end-
+to-end framework that explicitly injects topological structures
+into the VLM backbone. To introduce topological edge infor-
+mation, Spatial Topology Aware Residual Attention (STAR-Att)
+directly integrates it into the VLM’s self-attention mechanism,
+enabling intrinsic spatial reasoning while preserving pretrained
+knowledge. To enhance topological node information, an In-
+terleaved Navigation Prompt strengthens node-level visual-text
+alignment. Finally, with the embedded topological graph, the
+model is capable of global action reasoning, allowing for
+robust path correction. On the R2R benchmark, TagaVLM
+achieves state-of-the-art performance among large-model-based
+methods, with a Success Rate (SR) of 51.09% and SPL of
+47.18 in unseen environments, outperforming prior work by
+3.39% in SR and 9.08 in SPL. This demonstrates that, for
+embodied spatial reasoning, targeted enhancements on smaller
+open-source VLMs can be more effective than brute-force model
+scaling. The code will be released upon publication.
 
 ## 🛠️ Requirements
 
@@ -95,7 +105,7 @@ Taga-VLM
 
 ## 🚀 Training
 
-To train the model (e.g., fine-tuning on the OV split), run the following script:
+To train the model, run the following script:
 
 ```bash
 bash script/train/finetune_ov_test.sh
