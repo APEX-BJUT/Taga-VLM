@@ -1,6 +1,7 @@
 # TagaVLM: Topology-Aware Global Action Reasoning for Vision-Language Navigation
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2603.02972"><img src="https://img.shields.io/badge/arXiv-2603.02972-b31b1b" alt="arXiv"></a>
   <a href="https://apex-bjut.github.io/Taga-VLM/"><img src="https://img.shields.io/badge/Project-Page-blue" alt="Project Page"></a>
   <a href="https://huggingface.co/tiredtony"><img src="https://img.shields.io/badge/%F0%9F%A4%97-Model%20Weights-yellow" alt="HuggingFace"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
