@@ -10,6 +10,8 @@
 
 Official implementation of the ICRA 2026 paper **"TagaVLM: Topology-Aware Global Action Reasoning for Vision-Language Navigation"**.
 
+> **⚠️ IMPORTANT:** Code cleaning and preprocessed data release are in progress. Full release coming soon!
+
 For details, please visit our [project page](https://apex-bjut.github.io/Taga-VLM/).
 
 ![TagaVLM Framework](assets/framework.png)
