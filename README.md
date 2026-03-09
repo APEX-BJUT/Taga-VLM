@@ -60,8 +60,10 @@ Download model weights and data from [HuggingFace](https://huggingface.co/tiredt
 ```text
 Taga-VLM
 ├── data
-│   ├── mp3d_pano_images
-│   ├── mp3d_views
+│   ├── mp3d_data
+│   ├── view_images_bgr_from_mattersim.h5
+│   ├── view_images_hm3d
+│   ├── view_images_hm3d_pano
 │   └── anno
 ├── model_zoo
 │   ├── TagaVLM-qwen2-7b

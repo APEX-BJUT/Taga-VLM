@@ -83,9 +83,12 @@ class LlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM):
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
         if inputs_embeds is None:
-            (input_ids, position_ids, attention_mask, past_key_values, inputs_embeds, labels) = self.prepare_inputs_labels_for_multimodal(input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities, image_sizes,nav_data=nav_data)
-            # (input_ids, position_ids, attention_mask, past_key_values, inputs_embeds, labels ,expanded_distance_matrix) = self.prepare_inputs_labels_for_multimodal(input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities, image_sizes,nav_data=nav_data)#TODO when training
-            # self.graph_sprels = expanded_distance_matrix #TODO when training
+            if self.model.training:
+                (input_ids, position_ids, attention_mask, past_key_values, inputs_embeds, labels ,expanded_distance_matrix) = self.prepare_inputs_labels_for_multimodal(input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities, image_sizes,nav_data=nav_data)#TODO when training
+                self.graph_sprels = expanded_distance_matrix #TODO when training
+            else:
+                (input_ids, position_ids, attention_mask, past_key_values, inputs_embeds, labels) = self.prepare_inputs_labels_for_multimodal(input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities, image_sizes,nav_data=nav_data)
+
         if dpo_forward:
             outputs = self.model(
                 input_ids=input_ids,

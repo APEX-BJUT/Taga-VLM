@@ -322,7 +322,7 @@ class LlavaMetaForCausalLM(ABC):
         
         # 转换为PyTorch张量并使用float16数据类型
         if not isinstance(dist_matrix, torch.Tensor):
-            dist_matrix = torch.tensor(dist_matrix, dtype=torch.float16, device=device) #TODO if inference float16
+            dist_matrix = torch.tensor(dist_matrix, dtype=torch.bfloat16 , device=device) #TODO if inference float16
         else:
             dist_matrix = dist_matrix.to(dtype=torch.float16, device=device)#TODO if inference float16
         
