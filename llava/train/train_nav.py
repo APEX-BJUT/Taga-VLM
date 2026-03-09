@@ -1133,50 +1133,12 @@ class LazySupervisedDataset(Dataset):
         self.list_data_dict = []
         #加载成对距离矩阵
         # precompute_dist_pairs
-        # self.precompute_dist_pairs = h5py.File('data/v7.1/gmap_pair_dist_train_v7.hdf5', 'r')
-        self.precompute_dist_pairs_rxrce = np.load('/root/liujiaxing/tagavlm_infer/v8/gmap_pair_dist_train.npz')
-        self.precompute_dist_pairs_r2rce = np.load('/root/liujiaxing/tagavlm_infer/v8/gmap_pair_dist_train.npz')
-        self.precompute_dist_pairs = np.load('/root/liujiaxing/tagavlm_infer/v8/gmap_pair_dist_train.npz')
-        # self.views_file = h5py.File('/root/liujiaxing/LLaVA-NeXT/data/view_images_bgr_from_mattersim.h5', 'r')
-        self.mp3d_views_file = h5py.File('/root/liujiaxing/tagavlm_infer/TagaVLM_infer_data/view_images_bgr_from_mattersim.h5', 'r')
-        # self.mp3d_views_file = "/root/liujiaxing/tagavlm_infer/TagaVLM_infer_data/view_images_bgr_from_mattersim"
-        self.hm3d_views_file = '/root/autodl-tmp/co-training-data/view_images_hm3d'
-        # self.hm3d_image_floder = 'data/view_images_hm3d_pano'
 
+        self.precompute_dist_pairs = np.load('/root/liujiaxing/tagavlm_infer/v8/gmap_pair_dist_train.npz')
+        self.mp3d_views_file = h5py.File('/root/liujiaxing/tagavlm_infer/TagaVLM_infer_data/view_images_bgr_from_mattersim.h5', 'r')
+        self.hm3d_views_file = '/root/autodl-tmp/co-training-data/view_images_hm3d'
         with open("/root/liujiaxing/tagavlm_infer/v8/cand_viewids_list_train.json", 'r', encoding='utf-8') as file:
             self.cand_viewids_list = json.load(file)
-
-        # 加载导航配置文件
-        # with open(data_args.nav_pretrain_config_file, 'r', encoding='utf-8') as file:
-        #     self.nav_pretrain_config = json.load(file)
-        # with open(data_args.nav_model_config_file, 'r', encoding='utf-8') as file:
-        #     self.nav_model_config = json.load(file)
-        # breakpoint()
-        # self.nav_data_cfg = EasyDict(self.nav_pretrain_config.train_datasets['R2R'])
-        # self.nav_data_cfg = self.nav_pretrain_config['train_datasets']['R2R']
-        # 实际的导航训练数据
-        # self.nav_db = R2RTextPathData(self.nav_data_cfg['train_traj_files'], 
-        #                               self.nav_data_cfg['img_ft_file'], 
-        #                               self.nav_data_cfg['dep_ft_file'],
-        #                               self.nav_data_cfg['scanvp_cands_file'], 
-        #                               self.nav_data_cfg['connectivity_dir'], 
-        #                               self.nav_data_cfg['img_file'],
-        #                               image_prob_size=self.nav_model_config['image_prob_size'],
-        #                               image_feat_size=self.nav_model_config['image_feat_size'], 
-        #                               depth_feat_size=self.nav_model_config['depth_feat_size'],
-        #                               angle_feat_size=self.nav_model_config['angle_feat_size'],
-        #                               max_txt_len=self.nav_pretrain_config['max_txt_len'], 
-        #                               in_memory=True,
-        #                               val_sample_num=None
-        # )
-
-        # #load nav data and create qa data
-        # rank0_print("load nav data and create qa data")
-        # for i in tqdm(range(0,len(self.nav_db.data))):
-        #     self.list_data_dict.append(self.get_nav_input_data(i))
-        
-
-
 
         # Handle multiple JSON files specified in the data_path
         if "{" in data_path and "}" in data_path:
@@ -1694,14 +1656,7 @@ class LazySupervisedDataset(Dataset):
                     # N = len(image_file) + 1
                     # dist_pairs = np.zeros((N, N), dtype=np.float32)
                     data_dict["nav_data"] = None
-            elif 'finetuning_data_gen_r2r' in image_file[0]:
-                dist_pairs = self.precompute_dist_pairs_r2rce[data_dict["id"]][...]
 
-                data_dict["nav_data"] = dist_pairs                
-            elif 'finetuning_data_gen_rxr' in image_file[0]:
-                dist_pairs = self.precompute_dist_pairs_rxrce[data_dict["id"]][...]
-
-                data_dict["nav_data"] = dist_pairs  
             else:
                 # N = len(image_file) + 1
                 # dist_pairs = np.zeros((N, N), dtype=np.float32)

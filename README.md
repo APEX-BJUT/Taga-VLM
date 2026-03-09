@@ -57,26 +57,28 @@ pip install flash_attn-*.whl
 
 Download model weights and data from [HuggingFace](https://huggingface.co/tiredtony) and place them as:
 
-```
-Taga-VLM/
-├── data/
-│   ├── mp3d_pano_images/
-│   ├── mp3d_views/
-│   └── anno/
-└── model_zoo/
-    ├── TagaVLM-7b/
-    └── TagaVLM-0.5b/
+```text
+Taga-VLM
+├── data
+│   ├── mp3d_pano_images
+│   ├── mp3d_views
+│   └── anno
+├── model_zoo
+│   ├── TagaVLM-qwen2-7b
+│   └── TagaVLM-qwen2-0.5b
+
 ```
 
 ## Training & Evaluation
 
 ```bash
 # Training
-bash scripts/train/finetune_ov_test.sh
+bash scripts/train/finetune_TagaVLM.sh
 
 # Evaluation on R2R
 cd map_nav_src && bash run_r2r.sh
 ```
+Note: Make sure the dtype is torch.float16 in line 325,327 of Taga-VLM/llava/model/llava_arch.py before evaluation, and for 0.5b model , add "vocab_size": 151936 and "tie_word_embeddings": true in config.json after training
 
 ## Citation
 

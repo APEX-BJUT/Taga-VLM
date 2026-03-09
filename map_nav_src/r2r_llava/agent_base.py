@@ -133,10 +133,8 @@ class Seq2SeqAgent(BaseAgent):
         self.device = torch.device('cuda:%d'%self.rank) 
         self.scanvp_cands = json.load(open("/root/liujiaxing/tagavlm_infer/TagaVLM_infer_data/R2R/annotations/scanvp_candview_relangles.json"))
         self.views_file = h5py.File('/root/liujiaxing/tagavlm_infer/TagaVLM_infer_data/view_images_bgr_from_mattersim.h5', 'r')
-        # self.mp3d_views_file = "/root/liujiaxing/tagavlm_infer/TagaVLM_infer_data/view_images_bgr_from_mattersim"
         self.hm3d_views_file = "/root/liujiaxing/LLaVA-NeXT-graph/data/view_images_hm3d/"
         connectivity_dir = '/root/liujiaxing/tagavlm_infer/TagaVLM_infer_data/R2R/connectivity'
-        #load llava  qwen-0.5b-r2r-50%-3-27       qwen-0.5b-r2r-100%-3-28
         pretrained = "/root/liujiaxing/tagavlm_infer/sample_trainer_test_epoch=3-sride=3-Scheduler-FSDP-2-20"
         model_name = "llava_qwen"
         device_map = "auto"
