@@ -564,23 +564,16 @@ class GMapNavAgent(Seq2SeqAgent):
             question = "<nav>"+ob['instruction']+"</nav>"+"historical observation:{"
             for i,  vpid in enumerate(traj):
                 if vpid != traj[-1]:
-                    connection_text = self.get_connection(self.graphs[ob["scan"]],nav_inputs['gmap_vpids'][idx],traj,vpid)
-                    his_curr_node_image_file.append(ob["scan"] +'/matterport_skybox_images/' + vpid + '_skybox_small_cropped.jpg')
-                    # question += "<node><image></node>"                     #v5
+                    his_curr_node_image_file.append(ob["scan"] +'/matterport_skybox_images/' + vpid + '_skybox_small.jpg')
                     question += "<node><idx>{}</idx><image></node>".format(i+1)  #v4
-
                 else:
-                    connection_text = self.get_connection(self.graphs[ob["scan"]],nav_inputs['gmap_vpids'][idx],traj,vpid)
-                    his_curr_node_image_file.append(ob["scan"] +'/matterport_skybox_images/' + vpid + '_skybox_small_cropped.jpg')
-                    # question += "};current observation:{" + "<node><image></node>" + "};candidate observation:{"                     #v5
+                    his_curr_node_image_file.append(ob["scan"] +'/matterport_skybox_images/' + vpid + '_skybox_small.jpg')
                     question += "};current observation:{<node><idx>"+str(i+1)+"</idx><image></node>};candidate observation:{"  #v4
             action_space = []
             for j ,vpid_cand in enumerate(nav_inputs['gmap_vpids'][idx]):
                 if j !=0:
                     if nav_inputs['gmap_visited_masks'][idx][j] == False:
-                        connection_text = self.get_connection(self.graphs[ob["scan"]],nav_inputs['gmap_vpids'][idx],traj,vpid_cand)
                         cand_node_image_file.append(vpid_cand)
-                        # question += "<node><idx><"+str(j)+"></idx><image></node>" #v5
                         question += "<node><idx>{}</idx><image></node>".format(j) #v4
                         action_space.append(j)
             question += "}"
@@ -642,10 +635,10 @@ class GMapNavAgent(Seq2SeqAgent):
             cand_id = []
             for image_file in his_curr_node_image_file:
                 if dataset == 'mp3d':
-                # image=Image.open("/root/liujiaxing/LLaVA-NeXT/data/view_images_from_mattersim/"+image_file).convert("RGB")
-                    image=Image.open("/root/liujiaxing/tagavlm_infer/TagaVLM_infer_data/mp3d_data_cropped/"+image_file).convert("RGB")
+
+                    image=Image.open(self.mp3d_views_file+image_file).convert("RGB")
                 else:
-                    image=Image.open("/root/liujiaxing/LLaVA-NeXT-graph/data/view_images_hm3d_pano/"+image_file).convert("RGB")
+                    image=Image.open(self.hm3d_views_file+image_file).convert("RGB")
                 
                 images.append(image)
             # for id, cand in view_imgs.items():

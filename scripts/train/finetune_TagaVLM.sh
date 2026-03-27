@@ -5,7 +5,11 @@ export NCCL_SOCKET_IFNAME=en,eth,em,bond
 export NCCL_DEBUG=INFO
 export NCCL_P2P_DISABLE=1
 export CUDA_VISIBLE_DEVICES='0,1'
-LLM_VERSION="model_zoo/llava-onevision-qwen2-0.5b-ov" 
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+LLM_VERSION="model_zoo/llava-onevision-qwen2-0.5b-ov"
 # for 7b model we recommend bs=1, accum=2, 16 nodes, 128 gpus, lr=1e-5, warmup=0.03
 # for 72b model we recommend bs=1, accum=1, 32 nodes, 256 gpus, lr=1e-5, warmup=0.03
 LLM_VERSION_CLEAN="${LLM_VERSION//\//_}"
@@ -21,8 +25,8 @@ echo "BASE_RUN_NAME: ${BASE_RUN_NAME}"
 
 # Stage 2
 PROMPT_VERSION="qwen_1_5"
-RUN_NAME="llava-onevision-${VISION_MODEL_VERSION_CLEAN}-${LLM_VERSION_CLEAN}-ov_stage_am9" 
-PREV_STAGE_CHECKPOINT="/root/liujiaxing/tagavlm_infer/llava-onevision-qwen2-0.5b-ov" # replace it with your last checkpoint training from single image collection
+RUN_NAME="llava-onevision-${VISION_MODEL_VERSION_CLEAN}-${LLM_VERSION_CLEAN}-ov_stage_am9"
+PREV_STAGE_CHECKPOINT="${PROJECT_ROOT}/model_zoo/llava-onevision-qwen2-0.5b-ov" # replace it with your last checkpoint training from single image collection
 echo "PREV_STAGE_CHECKPOINT: ${PREV_STAGE_CHECKPOINT}"
 echo "MID_RUN_NAME: ${RUN_NAME}"
 RANK=${RANK:-0}
@@ -31,13 +35,13 @@ PORT=${PORT:-"29501"}
 NNODES=${NNODES:-1}
 NUM_GPUS=${NUM_GPUS:-2}
 
-ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NNODES}" --node_rank="${RANK}" --master_addr="${ADDR}" --master_port="${PORT}" \
+ACCELERATE_CPU_AFFINITY=1 uv run torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NNODES}" --node_rank="${RANK}" --master_addr="${ADDR}" --master_port="${PORT}" \
     llava/train/train_mem_nav.py \
     --deepspeed scripts/zero2.json \
     --model_name_or_path $PREV_STAGE_CHECKPOINT \
     --version $PROMPT_VERSION \
-    --data_path /root/liujiaxing/tagavlm_infer/v8/llava_nav_instruct_train.json \
-    --image_folder /root/liujiaxing/tagavlm_infer/TagaVLM_infer_data/mp3d_data_cropped \
+    --data_path ${PROJECT_ROOT}/scripts/train/TagaVLM_data.yaml \
+    --image_folder ${PROJECT_ROOT}/data/mp3d_data \
     --mm_tunable_parts="mm_mlp_adapter,mm_language_model" \
     --mm_vision_tower_lr=2e-6 \
     --vision_tower ${VISION_MODEL_VERSION} \
@@ -51,7 +55,7 @@ ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NN
     --mm_patch_merge_type spatial_unpad \
     --bf16 True \
     --run_name $RUN_NAME \
-    --output_dir output/qwen-0.5b-r2r-v8-epoch=3-stride=3-1-29 \
+    --output_dir output/qwen-0.5b-r2r-v8-epoch=3-stride=3 \
     --num_train_epochs 3 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 4 \
@@ -75,9 +79,10 @@ ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${NUM_GPUS}" --nnodes="${NN
     --torch_compile_backend "inductor" \
     --dataloader_drop_last True \
     --frames_upbound 32 \
+    --mm_spatial_pool_stride 3 \
     --lora_enable False \
-    --nav_pretrain_config_file /root/liujiaxing/LLaVA-NeXT/llava_nav/pretrain_src/run_pt/r2r_pretrain_habitat_siglip.json \
-    --nav_model_config_file /root/liujiaxing/LLaVA-NeXT/llava_nav/pretrain_src/run_pt/r2r_model_config_dep.json
+    --nav_pretrain_config_file ${PROJECT_ROOT}/llava_nav/pretrain_src/run_pt/r2r_pretrain_habitat_siglip.json \
+    --nav_model_config_file ${PROJECT_ROOT}/llava_nav/pretrain_src/run_pt/r2r_model_config_dep.json
 exit 0;
 
 # You can delete the sdpa attn_implementation if you want to use flash attn

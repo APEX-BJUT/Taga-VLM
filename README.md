@@ -10,8 +10,6 @@
 
 Official implementation of the ICRA 2026 paper **"TagaVLM: Topology-Aware Global Action Reasoning for Vision-Language Navigation"**.
 
-> **⚠️ IMPORTANT:** Code cleaning and preprocessed data release are in progress. Full release coming soon!
-
 For details, please visit our [project page](https://apex-bjut.github.io/Taga-VLM/).
 
 ![TagaVLM Framework](assets/framework.png)
@@ -27,60 +25,76 @@ For details, please visit our [project page](https://apex-bjut.github.io/Taga-VL
 
 ## Installation
 
+Requires [uv](https://docs.astral.sh/uv/) and Python 3.9-3.11.
+
 ```bash
 git clone https://github.com/APEX-BJUT/Taga-VLM.git
 cd Taga-VLM
 
-conda create -n tagavlm python=3.9 -y
-conda activate tagavlm
-pip install --upgrade pip
-pip install -e ".[train]"
+# Inference only
+uv sync
+
+# Training (includes deepspeed, wandb, peft, etc.)
+uv sync --extra train
 ```
 
-Install the patched transformers (required for STAR-Att):
+This will create a `.venv`, install all dependencies, and build the patched transformers (required for STAR-Att) automatically.
+
+**Flash-Attention 2 (optional):** Download the prebuilt `.whl` for your CUDA/Python version from [Flash-Attention Releases](https://github.com/Dao-AILab/flash-attention/releases) (select the `abiFALSE` variant), then:
 
 ```bash
-cd transformers-4.40.0 && pip install -e . && cd ..
-```
-
-Additional pinned dependencies: `accelerate==0.28.0`, `numpy<=2.0`.
-
-**Flash-Attention 2:** Download the prebuilt `.whl` for your CUDA/Python version from [Flash-Attention Releases](https://github.com/Dao-AILab/flash-attention/releases) (select the `abiFALSE` variant), then:
-
-```bash
-pip install flash_attn-*.whl
+uv pip install flash_attn-*.whl
 ```
 
 **Matterport3D Simulator:** Follow [Matterport3DSimulator](https://github.com/peteanderson80/Matterport3DSimulator).
 
 ## Data Preparation
 
-Download model weights and data from [HuggingFace](https://huggingface.co/tiredtony) and place them as:
+Download model weights and data from [HuggingFace](https://huggingface.co/tiredtony):
+
+```bash
+# Model weights
+huggingface-cli download tiredtony/TagaVLM-qwen2-0.5b --local-dir model_zoo/TagaVLM-qwen2-0.5b
+huggingface-cli download tiredtony/TagaVLM-qwen2-7b   --local-dir model_zoo/TagaVLM-qwen2-7b
+
+# Dataset
+huggingface-cli download tiredtony/TagaVLM_infer_data --repo-type dataset --local-dir data
+```
+
+Expected directory structure:
 
 ```text
-Taga-VLM
-├── data
-│   ├── mp3d_data
+Taga-VLM/
+├── data/
+│   ├── R2R/
+│   │   ├── annotations/
+│   │   └── connectivity/
+│   ├── mp3d_data/
 │   ├── view_images_bgr_from_mattersim.h5
-│   ├── view_images_hm3d
-│   ├── view_images_hm3d_pano
-│   └── anno
-├── model_zoo
-│   ├── TagaVLM-qwen2-7b
-│   └── TagaVLM-qwen2-0.5b
-
+│   ├── view_images_hm3d/
+│   └── anno/
+├── model_zoo/
+│   ├── TagaVLM-qwen2-0.5b/
+│   └── TagaVLM-qwen2-7b/
 ```
 
 ## Training & Evaluation
 
-```bash
-# Training
-bash scripts/train/finetune_TagaVLM.sh
+### Training
 
-# Evaluation on R2R
+```bash
+bash scripts/train/finetune_TagaVLM.sh
+```
+
+> **Note:** For the 0.5B model, add `"vocab_size": 151936` and `"tie_word_embeddings": true` to `config.json` after training.
+
+### Evaluation
+
+```bash
 cd map_nav_src && bash run_r2r.sh
 ```
-Note: Make sure the dtype is torch.float16 in line 325,327 of Taga-VLM/llava/model/llava_arch.py before evaluation, and for 0.5b model , add "vocab_size": 151936 and "tie_word_embeddings": true in config.json after training
+
+To switch between models, edit `model_zoo/TagaVLM-qwen2-*` path in `map_nav_src/r2r_llava/agent_base.py`. The spatial pool stride is read from each model's `config.json` (`mm_spatial_pool_stride`: 3 for 0.5B, 2 for 7B).
 
 ## Citation
 

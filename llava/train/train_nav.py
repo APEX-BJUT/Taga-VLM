@@ -15,49 +15,67 @@
 #    limitations under the License.
 
 import ast
-import os
 import copy
-from dataclasses import dataclass, field
 import json
 import logging
-import pathlib
-from typing import Dict, Optional, Sequence, List
-from PIL import Image, ImageFile
-from packaging import version
-import numpy as np
-
-import time
-import random
-import yaml
 import math
+import os
+import pathlib
+import random
 import re
+import time
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Sequence
+
+import cv2
+import deepspeed
+import h5py
+import numpy as np
+import tokenizers
 import torch
+
 # torch._dynamo.config.optimize_ddp = False
 import transformers
-import tokenizers
-import deepspeed
+import yaml
+from packaging import version
+from PIL import Image, ImageFile
 
-from transformers import AutoConfig
-from torch.utils.data import Dataset
-from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN, IMAGE_TOKEN_INDEX, GRAPH_TOKEN, GRAPH_TOKEN_INDEX ,STOP_TOKEN ,STOP_TOKEN_INDEX ,NODE_BEGIIN_TOKEN, NODE_BEGIIN_TOKEN_INDEX, NODE_END_TOKEN, NODE_END_TOKEN_INDEX ,NAV_INSTR_BEGIN_TOKEN,NAV_INSTR_END_TOKEN,IDX_BEGIN_TOKEN,IDX_END_TOKEN
-from llava.train.llava_trainer import LLaVATrainer
-
-from llava import conversation as conversation_lib
-from llava.model import *
-from llava.mm_utils import process_highres_image, process_anyres_image, process_highres_image_crop_split, tokenizer_image_token
-from llava.utils import rank0_print, process_video_with_pyav, process_video_with_decord
-
-#导航
+# Navigation
 # from llava.model.llava_nav.data.dataset_for_llava import R2RTextPathData
 from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import Dataset
+
 # from llava.model.llava_nav.data.common import pad_tensors, gen_seq_masks
 # from easydict import EasyDict
-from tqdm import tqdm
 # import netron
 # from llava.model.llava_nav.model.pretrain_cmt import GlocalTextPathCMTPreTraining
-from transformers import AutoTokenizer, PretrainedConfig
-import h5py
-import cv2
+from transformers import AutoConfig
+
+from llava import conversation as conversation_lib
+from llava.constants import (
+    DEFAULT_IM_END_TOKEN,
+    DEFAULT_IM_START_TOKEN,
+    DEFAULT_IMAGE_TOKEN,
+    IDX_BEGIN_TOKEN,
+    IDX_END_TOKEN,
+    IGNORE_INDEX,
+    IMAGE_TOKEN_INDEX,
+    NAV_INSTR_BEGIN_TOKEN,
+    NAV_INSTR_END_TOKEN,
+    NODE_BEGIIN_TOKEN,
+    NODE_END_TOKEN,
+    STOP_TOKEN,
+)
+from llava.mm_utils import (
+    process_anyres_image,
+    process_highres_image,
+    process_highres_image_crop_split,
+    tokenizer_image_token,
+)
+from llava.model import *
+from llava.train.llava_trainer import LLaVATrainer
+from llava.utils import process_video_with_decord, rank0_print
+
 # from llava.model.multimodal_encoder.graph_encoder import load_graph_encoder
 torch.multiprocessing.set_sharing_strategy("file_system")
 
@@ -70,10 +88,18 @@ IS_TOKENIZER_GREATER_THAN_0_14 = version.parse(tokenizers.__version__) >= versio
 @dataclass
 class ModelArguments:
     model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
-    model_class_name: Optional[str] = field(default=None, metadata={"help": "Used to init model class, format is XXXXForCausalLM. e.g. currently XXXX is chosen from LlavaLlama, LlavaMixtral, LlavaMistral, Llama"})
+    model_class_name: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Used to init model class, format is XXXXForCausalLM. e.g. currently XXXX is chosen from LlavaLlama, LlavaMixtral, LlavaMistral, Llama"
+        },
+    )
 
     mm_tunable_parts: Optional[str] = field(
-        default=None, metadata={"help": 'Could be "mm_mlp_adapter", "mm_vision_resampler", "mm_vision_tower,mm_mlp_adapter,mm_language_model", "mm_vision_tower,mm_mlp_adapter,mm_language_model", "mm_mlp_adapter,mm_language_model"'}
+        default=None,
+        metadata={
+            "help": 'Could be "mm_mlp_adapter", "mm_vision_resampler", "mm_vision_tower,mm_mlp_adapter,mm_language_model", "mm_vision_tower,mm_mlp_adapter,mm_language_model", "mm_mlp_adapter,mm_language_model"'
+        },
     )
     # deciding which part of the multimodal model to tune, will overwrite other previous settings
 
@@ -119,17 +145,20 @@ class ModelArguments:
     use_pos_skipping: Optional[bool] = field(default=False)
     pos_skipping_range: Optional[int] = field(default=4096)
 
-
     mm_newline_position: Optional[str] = field(default="grid")
     delay_load: Optional[bool] = field(default=True)
     add_faster_video: Optional[bool] = field(default=False)
     faster_token_stride: Optional[int] = field(default=10)
 
 
-
 @dataclass
 class DataArguments:
-    data_path: str = field(default=None, metadata={"help": "Path to the training data, in llava's instruction.json format. Supporting multiple json files via /path/to/{a,b,c}.json"})
+    data_path: str = field(
+        default=None,
+        metadata={
+            "help": "Path to the training data, in llava's instruction.json format. Supporting multiple json files via /path/to/{a,b,c}.json"
+        },
+    )
     lazy_preprocess: bool = False
     is_multimodal: bool = False
     early_mix_text: bool = False
@@ -161,8 +190,12 @@ class TrainingArguments(transformers.TrainingArguments):
         default=4096,
         metadata={"help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."},
     )
-    double_quant: bool = field(default=True, metadata={"help": "Compress the quantization statistics through double quantization."})
-    quant_type: str = field(default="nf4", metadata={"help": "Quantization data type to use. Should be one of `fp4` or `nf4`."})
+    double_quant: bool = field(
+        default=True, metadata={"help": "Compress the quantization statistics through double quantization."}
+    )
+    quant_type: str = field(
+        default="nf4", metadata={"help": "Quantization data type to use. Should be one of `fp4` or `nf4`."}
+    )
     bits: int = field(default=16, metadata={"help": "How many bits to use."})
     lora_enable: bool = False
     lora_r: int = 64
@@ -178,7 +211,9 @@ class TrainingArguments(transformers.TrainingArguments):
     auto_find_batch_size: bool = field(default=False)
     gradient_checkpointing: bool = field(default=True)
     verbose_logging: bool = field(default=False)
-    attn_implementation: str = field(default="flash_attention_2", metadata={"help": "Use transformers attention implementation."})
+    attn_implementation: str = field(
+        default="flash_attention_2", metadata={"help": "Use transformers attention implementation."}
+    )
 
 
 # @dataclass
@@ -257,7 +292,7 @@ def get_mm_adapter_state_maybe_zero_3(named_params, keys_to_match):
 def find_all_linear_names(model):
     cls = torch.nn.Linear
     lora_module_names = set()
-    multimodal_keywords = ["mm_projector", "vision_tower", "vision_resampler" ]
+    multimodal_keywords = ["mm_projector", "vision_tower", "vision_resampler"]
     for name, module in model.named_modules():
         if any(mm_keyword in name for mm_keyword in multimodal_keywords):
             continue
@@ -275,7 +310,12 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
     if hasattr(trainer.args, "tune_mm_mlp_adapter") and trainer.args.tune_mm_mlp_adapter:
         check_only_save_mm_adapter_tunnable = True
     # only has mm_mlp_adapter and mm_vision_resampler in the tuneable parts
-    elif hasattr(trainer.args, "mm_tunable_parts") and (len(trainer.args.mm_tunable_parts.split(",")) == 1 and ("mm_mlp_adapter" in trainer.args.mm_tunable_parts or "mm_vision_resampler" in trainer.args.mm_tunable_parts)):
+    elif hasattr(trainer.args, "mm_tunable_parts") and (
+        len(trainer.args.mm_tunable_parts.split(",")) == 1
+        and (
+            "mm_mlp_adapter" in trainer.args.mm_tunable_parts or "mm_vision_resampler" in trainer.args.mm_tunable_parts
+        )
+    ):
         check_only_save_mm_adapter_tunnable = True
     else:
         check_only_save_mm_adapter_tunnable = False
@@ -300,7 +340,7 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
                 os.makedirs(mm_projector_folder, exist_ok=True)
                 torch.save(weight_to_save, os.path.join(mm_projector_folder, f"{current_folder}.bin"))
             else:
-                torch.save(weight_to_save, os.path.join(output_dir, f"mm_projector.bin"))
+                torch.save(weight_to_save, os.path.join(output_dir, "mm_projector.bin"))
         return
 
     if trainer.deepspeed:
@@ -350,7 +390,9 @@ def _tokenize_fn(strings: Sequence[str], tokenizer: transformers.PreTrainedToken
         for text in strings
     ]
     input_ids = labels = [tokenized.input_ids[0] for tokenized in tokenized_list]
-    input_ids_lens = labels_lens = [tokenized.input_ids.ne(tokenizer.pad_token_id).sum().item() for tokenized in tokenized_list]
+    input_ids_lens = labels_lens = [
+        tokenized.input_ids.ne(tokenizer.pad_token_id).sum().item() for tokenized in tokenized_list
+    ]
     return dict(
         input_ids=input_ids,
         labels=labels,
@@ -401,12 +443,18 @@ def preprocess_multimodal(sources: Sequence[str], data_args: DataArguments) -> D
             # if DEFAULT_IMAGE_TOKEN in sentence["value"] and not sentence["value"].startswith(DEFAULT_IMAGE_TOKEN):
             # only check for num_im=1
             num_im = len(re.findall(DEFAULT_IMAGE_TOKEN, sentence["value"]))
-            if num_im == 1 and DEFAULT_IMAGE_TOKEN in sentence["value"] and not sentence["value"].startswith(DEFAULT_IMAGE_TOKEN):
+            if (
+                num_im == 1
+                and DEFAULT_IMAGE_TOKEN in sentence["value"]
+                and not sentence["value"].startswith(DEFAULT_IMAGE_TOKEN)
+            ):
                 sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, "").strip()
                 sentence["value"] = DEFAULT_IMAGE_TOKEN + "\n" + sentence["value"]
                 sentence["value"] = sentence["value"].strip()
                 if "mmtag" in conversation_lib.default_conversation.version:
-                    sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, "<Image>" + DEFAULT_IMAGE_TOKEN + "</Image>")
+                    sentence["value"] = sentence["value"].replace(
+                        DEFAULT_IMAGE_TOKEN, "<Image>" + DEFAULT_IMAGE_TOKEN + "</Image>"
+                    )
             replace_token = DEFAULT_IMAGE_TOKEN
             if data_args.mm_use_im_start_end:
                 replace_token = DEFAULT_IM_START_TOKEN + replace_token + DEFAULT_IM_END_TOKEN
@@ -439,7 +487,9 @@ def preprocess_llama_2(sources, tokenizer: transformers.PreTrainedTokenizer, has
     # Tokenize conversations
 
     if has_image:
-        input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0)
+        input_ids = torch.stack(
+            [tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0
+        )
     else:
         input_ids = tokenizer(
             conversations,
@@ -485,7 +535,7 @@ def preprocess_llama_2(sources, tokenizer: transformers.PreTrainedTokenizer, has
         if cur_len < tokenizer.model_max_length:
             if cur_len != total_len:
                 target[:] = IGNORE_INDEX
-                print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}." f" (ignored)")
+                print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}. (ignored)")
 
     return dict(
         input_ids=input_ids,
@@ -493,7 +543,9 @@ def preprocess_llama_2(sources, tokenizer: transformers.PreTrainedTokenizer, has
     )
 
 
-def preprocess_gemma(sources: List[List[Dict[str, str]]], tokenizer: transformers.PreTrainedTokenizer, has_image: bool = False) -> Dict:
+def preprocess_gemma(
+    sources: List[List[Dict[str, str]]], tokenizer: transformers.PreTrainedTokenizer, has_image: bool = False
+) -> Dict:
     conv: conversation_lib.Conversation = conversation_lib.default_conversation.copy()
     roles: Dict[str, str] = {"human": conv.roles[0], "gpt": conv.roles[1]}
 
@@ -513,7 +565,9 @@ def preprocess_gemma(sources: List[List[Dict[str, str]]], tokenizer: transformer
 
     # Tokenize conversations
     if has_image:
-        input_ids: torch.Tensor = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0)
+        input_ids: torch.Tensor = torch.stack(
+            [tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0
+        )
     else:
         input_ids: torch.Tensor = tokenizer(
             conversations,
@@ -564,7 +618,7 @@ def preprocess_gemma(sources: List[List[Dict[str, str]]], tokenizer: transformer
         if cur_len < tokenizer.model_max_length:
             if cur_len != total_len:
                 target[:] = IGNORE_INDEX
-                print(f"warning: tokenization mismatch: {cur_len} vs. {total_len}." f" (ignored)")
+                print(f"warning: tokenization mismatch: {cur_len} vs. {total_len}. (ignored)")
 
     return dict(
         input_ids=input_ids,
@@ -572,7 +626,13 @@ def preprocess_gemma(sources: List[List[Dict[str, str]]], tokenizer: transformer
     )
 
 
-def preprocess_qwen(sources, tokenizer: transformers.PreTrainedTokenizer, has_image: bool = False, max_len=2048, system_message: str = "You are a helpful assistant.") -> Dict:
+def preprocess_qwen(
+    sources,
+    tokenizer: transformers.PreTrainedTokenizer,
+    has_image: bool = False,
+    max_len=2048,
+    system_message: str = "You are a helpful assistant.",
+) -> Dict:
     # roles = {"human": "<|im_start|>user", "gpt": "<|im_start|>assistant"}
     roles = {"human": "user", "gpt": "assistant"}
 
@@ -586,7 +646,7 @@ def preprocess_qwen(sources, tokenizer: transformers.PreTrainedTokenizer, has_im
     image_token_index = tokenizer.convert_tokens_to_ids("<image>")
     im_start, im_end = tokenizer.additional_special_tokens_ids
     # unmask_tokens = ["<|im_start|>", "<|im_start|>", "\n"]
-    unmask_tokens_idx =  [198, im_start, im_end]
+    unmask_tokens_idx = [198, im_start, im_end]
     nl_tokens = tokenizer("\n").input_ids
 
     # Reset Qwen chat templates so that it won't include system message every time we apply
@@ -607,7 +667,7 @@ def preprocess_qwen(sources, tokenizer: transformers.PreTrainedTokenizer, has_im
 
         # New version, use apply chat template
         # Build system message for each sentence
-        input_id += tokenizer.apply_chat_template([{"role" : "system", "content" : system_message}])
+        input_id += tokenizer.apply_chat_template([{"role": "system", "content": system_message}])
         target += [IGNORE_INDEX] * len(input_id)
 
         for conv in source:
@@ -619,18 +679,16 @@ def preprocess_qwen(sources, tokenizer: transformers.PreTrainedTokenizer, has_im
                 role = conv["from"]
                 content = conv["value"]
 
-            role =  roles.get(role, role)
-            
-            conv = [{"role" : role, "content" : content}]
+            role = roles.get(role, role)
+
+            conv = [{"role": role, "content": content}]
             encode_id = tokenizer.apply_chat_template(conv)
             input_id += encode_id
             if role in ["user", "system"]:
                 target += [IGNORE_INDEX] * len(encode_id)
             else:
                 target += encode_id
-        
 
-                    
         assert len(input_id) == len(target), f"{len(input_id)} != {len(target)}"
         for idx, encode_id in enumerate(input_id):
             if encode_id in unmask_tokens_idx:
@@ -647,7 +705,14 @@ def preprocess_qwen(sources, tokenizer: transformers.PreTrainedTokenizer, has_im
         labels=targets,  # tensor(bs x seq_len)
     )
 
-def preprocess_qwen_nav(sources, tokenizer: transformers.PreTrainedTokenizer, has_image: bool = False, max_len=2048, system_message: str = "You are a helpful assistant.") -> Dict:
+
+def preprocess_qwen_nav(
+    sources,
+    tokenizer: transformers.PreTrainedTokenizer,
+    has_image: bool = False,
+    max_len=2048,
+    system_message: str = "You are a helpful assistant.",
+) -> Dict:
     # roles = {"human": "<|im_start|>user", "gpt": "<|im_start|>assistant"}
     roles = {"human": "user", "gpt": "assistant"}
 
@@ -658,16 +723,15 @@ def preprocess_qwen_nav(sources, tokenizer: transformers.PreTrainedTokenizer, ha
     if has_image:
         tokenizer.add_tokens(["<image>"], special_tokens=True)
 
-
-#     system_message = "Assume you are an autonomous robot and programmed for navigation tasks. \
-# You will move between nodes on a topological map according to instructions. \
-# The following images represent the images you see at each node. \
-# The nodes on the topological map are divided into historical nodes, current nodes, and candidate nodes. \
-# You need to decide the target node for movement based on the navigation instructions and the images of each node. \
-# The target node should be selected from the candidate nodes. Navigation instructions will be marked with <nav> and </nav>, nodes will be marked with <node> and </node>, and node indices will be marked with <idx> and </idx>. \
-# Please respond with the target node index in the form: <node>{node index}</node>. \
-# If you believe the current node is already the destination described in the navigation instruction, please respond directly with <stop>."
-    system_message="""<|im_start|>system
+    #     system_message = "Assume you are an autonomous robot and programmed for navigation tasks. \
+    # You will move between nodes on a topological map according to instructions. \
+    # The following images represent the images you see at each node. \
+    # The nodes on the topological map are divided into historical nodes, current nodes, and candidate nodes. \
+    # You need to decide the target node for movement based on the navigation instructions and the images of each node. \
+    # The target node should be selected from the candidate nodes. Navigation instructions will be marked with <nav> and </nav>, nodes will be marked with <node> and </node>, and node indices will be marked with <idx> and </idx>. \
+    # Please respond with the target node index in the form: <node>{node index}</node>. \
+    # If you believe the current node is already the destination described in the navigation instruction, please respond directly with <stop>."
+    system_message = """<|im_start|>system
 # Role
 You are an autonomous robot programmed for navigation tasks.
 
@@ -697,52 +761,11 @@ Navigate between nodes on a topological map based on given instructions and visu
 2. ONLY select from candidate nodes
 3. NEVER add additional text or explanations
 4. NEVER use any other tags or formats"""
-    
-
-#     system_message="""<|im_start|>system    
-# # Role
-# You are an autonomous robot programmed for navigation and visual understanding tasks.
-
-# # Core Task
-# Execute the task corresponding to the input format:
-# 1. **Navigation**: Navigate between nodes when instructions are wrapped in <nav> tags.
-# 2. **Generation & VQA**: Generate instructions or answer questions for inputs without <nav> tags.
-
-# # Context
-# - You operate on a topological map or analyze visual inputs.
-# - Navigation instructions (if present) are within <nav></nav> tags.
-# - Node information is within <node></node> tags.
-# - Node indices are within <idx></idx> tags.
-
-# # Rules
-# 1. **CHECK INPUT TYPE**:
-#    - IF input contains <nav> tags: **ENTER NAVIGATION MODE**.
-#    - IF input has NO <nav> tags: **ENTER TEXT MODE**.
-
-# 2. **NAVIGATION MODE RULES (<nav> exists)**:
-#    - Analyze instructions and compare visual information at candidate nodes.
-#    - ONLY select from candidate nodes.
-#    - Output format MUST be <node>{node index}</node> or <stop>.
-#    - **NO other text allowed.**
-
-# 3. **TEXT MODE RULES (No <nav>)**:
-#    - For Instruction Generation: Summarize the path shown in the nodes.
-#    - For Visual Question Answer: Answer the question based on the provided images.
-#    - Output format: Natural language response.
-
-# # Response Format
-# **Situation 1: Navigation Task (<nav> present)**
-# - Target identified: <node>{node index}</node>
-# - Destination reached: <stop>
-# (Constraint: NO other text allowed)
-
-# **Situation 2: Generation/Visual Question Answer Task (No <nav>)**
-# - Return the generated instruction or answer directly in text."""
 
     image_token_index = tokenizer.convert_tokens_to_ids("<image>")
     im_start, im_end = tokenizer.additional_special_tokens_ids
     # unmask_tokens = ["<|im_start|>", "<|im_start|>", "\n"]
-    unmask_tokens_idx =  [198, im_start, im_end]
+    unmask_tokens_idx = [198, im_start, im_end]
     nl_tokens = tokenizer("\n").input_ids
 
     # Reset Qwen chat templates so that it won't include system message every time we apply
@@ -763,7 +786,7 @@ Navigate between nodes on a topological map based on given instructions and visu
 
         # New version, use apply chat template
         # Build system message for each sentence
-        input_id += tokenizer.apply_chat_template([{"role" : "system", "content" : system_message}])
+        input_id += tokenizer.apply_chat_template([{"role": "system", "content": system_message}])
         target += [IGNORE_INDEX] * len(input_id)
 
         for conv in source:
@@ -775,25 +798,23 @@ Navigate between nodes on a topological map based on given instructions and visu
                 role = conv["from"]
                 content = conv["value"]
 
-            role =  roles.get(role, role)
-            
-            conv = [{"role" : role, "content" : content}]
+            role = roles.get(role, role)
+
+            conv = [{"role": role, "content": content}]
             encode_id = tokenizer.apply_chat_template(conv)
             input_id += encode_id
             if role in ["user", "system"]:
                 target += [IGNORE_INDEX] * len(encode_id)
             else:
                 target += encode_id
-        
 
-                    
         assert len(input_id) == len(target), f"{len(input_id)} != {len(target)}"
         for idx, encode_id in enumerate(input_id):
             if encode_id in unmask_tokens_idx:
                 target[idx] = encode_id
             if encode_id == image_token_index:
                 input_id[idx] = IMAGE_TOKEN_INDEX
-            #nav replace graph token id to -300
+            # nav replace graph token id to -300
             # if encode_id == graph_token_index:
             #     input_id[idx] = GRAPH_TOKEN_INDEX
         input_ids.append(input_id)
@@ -805,6 +826,7 @@ Navigate between nodes on a topological map based on given instructions and visu
         input_ids=input_ids,  # tensor(bs x seq_len)
         labels=targets,  # tensor(bs x seq_len)
     )
+
 
 def preprocess_llama3(
     sources,
@@ -850,7 +872,7 @@ def preprocess_llama3(
 
         # New version, use apply chat template
         # Build system message for each sentence
-        input_id += tokenizer.apply_chat_template([{"role" : "system", "content" : system_message}])
+        input_id += tokenizer.apply_chat_template([{"role": "system", "content": system_message}])
         target += [IGNORE_INDEX] * len(input_id)
 
         for conv in source:
@@ -862,9 +884,9 @@ def preprocess_llama3(
                 role = conv["from"]
                 content = conv["value"]
 
-            role =  roles.get(role, role)
-            
-            conv = [{"role" : role, "content" : content}]
+            role = roles.get(role, role)
+
+            conv = [{"role": role, "content": content}]
             # First is bos token we don't need here
             encode_id = tokenizer.apply_chat_template(conv)[1:]
             input_id += encode_id
@@ -872,9 +894,7 @@ def preprocess_llama3(
                 target += [IGNORE_INDEX] * len(encode_id)
             else:
                 target += encode_id
-        
 
-                    
         assert len(input_id) == len(target), f"{len(input_id)} != {len(target)}"
         for idx, encode_id in enumerate(input_id):
             if encode_id in unmask_tokens_idx:
@@ -913,7 +933,9 @@ def preprocess_v1(sources, tokenizer: transformers.PreTrainedTokenizer, has_imag
     # Tokenize conversations
 
     if has_image:
-        input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0)
+        input_ids = torch.stack(
+            [tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0
+        )
     else:
         input_ids = tokenizer(
             conversations,
@@ -963,7 +985,7 @@ def preprocess_v1(sources, tokenizer: transformers.PreTrainedTokenizer, has_imag
         if cur_len < tokenizer.model_max_length:
             if cur_len != total_len:
                 target[:] = IGNORE_INDEX
-                print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}." f" (ignored)")
+                print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}. (ignored)")
 
     return dict(
         input_ids=input_ids,
@@ -992,7 +1014,9 @@ def preprocess_mpt(sources, tokenizer: transformers.PreTrainedTokenizer, has_ima
     # Tokenize conversations
 
     if has_image:
-        input_ids = torch.stack([tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0)
+        input_ids = torch.stack(
+            [tokenizer_image_token(prompt, tokenizer, return_tensors="pt") for prompt in conversations], dim=0
+        )
     else:
         input_ids = tokenizer(
             conversations,
@@ -1044,7 +1068,7 @@ def preprocess_mpt(sources, tokenizer: transformers.PreTrainedTokenizer, has_ima
         if cur_len < tokenizer.model_max_length:
             if cur_len != total_len:
                 target[:] = IGNORE_INDEX
-                print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}." f"(#turns={len(re_rounds)} ignored)")
+                print(f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}.(#turns={len(re_rounds)} ignored)")
 
     return dict(
         input_ids=input_ids,
@@ -1131,13 +1155,16 @@ class LazySupervisedDataset(Dataset):
         super(LazySupervisedDataset, self).__init__()
         self.tokenizer = tokenizer
         self.list_data_dict = []
-        #加载成对距离矩阵
+        # Load precomputed pairwise distance matrices
         # precompute_dist_pairs
-
-        self.precompute_dist_pairs = np.load('/root/liujiaxing/tagavlm_infer/v8/gmap_pair_dist_train.npz')
-        self.mp3d_views_file = h5py.File('/root/liujiaxing/tagavlm_infer/TagaVLM_infer_data/view_images_bgr_from_mattersim.h5', 'r')
-        self.hm3d_views_file = '/root/autodl-tmp/co-training-data/view_images_hm3d'
-        with open("/root/liujiaxing/tagavlm_infer/v8/cand_viewids_list_train.json", 'r', encoding='utf-8') as file:
+        # image_folder points to data/mp3d_data, so data_root = its parent
+        data_root = os.path.dirname(data_args.image_folder)
+        self.precompute_dist_pairs = np.load(os.path.join(data_root, "anno/mp3d-anno-80k/gmap_pair_dist_train.npz"))
+        self.mp3d_views_file = h5py.File(os.path.join(data_root, "view_images_bgr_from_mattersim.h5"), "r")
+        self.hm3d_views_file = os.path.join(data_root, "view_images_hm3d")
+        with open(
+            os.path.join(data_root, "anno/mp3d-anno-80k/cand_viewids_list_train.json"), "r", encoding="utf-8"
+        ) as file:
             self.cand_viewids_list = json.load(file)
 
         # Handle multiple JSON files specified in the data_path
@@ -1252,7 +1279,7 @@ class LazySupervisedDataset(Dataset):
     #         for source in cand_view_source_list:
     #             [(k,v)]=source.items()
     #             images.append(self.views_file[scan+'_'+k][v])
-                
+
     #         image = cv2.hconcat(images)
     #         # for idx ,view in enumerate(images):
     #         #     if idx == 0:
@@ -1260,53 +1287,52 @@ class LazySupervisedDataset(Dataset):
     #         #     else:
     #         #         image = np.concatenate((image,view),axis=1)
     #         return image
-    def get_cand_view_imgs(self,scan_candvpid,item_id):
-        scan = scan_candvpid.split('_')[0]
-        candvpid = scan_candvpid.split('_')[1]
+    def get_cand_view_imgs(self, scan_candvpid, item_id):
+        scan = scan_candvpid.split("_")[0]
+        candvpid = scan_candvpid.split("_")[1]
         cand_view_source_list = self.cand_viewids_list[item_id]["cand_viewids"][candvpid]
         images = []
-        if len(cand_view_source_list)<2:
-            [(k,v)]=cand_view_source_list[0].items()
-            image = self.mp3d_views_file[scan+'_'+k][v]
+        if len(cand_view_source_list) < 2:
+            [(k, v)] = cand_view_source_list[0].items()
+            image = self.mp3d_views_file[scan + "_" + k][v]
             # image = Image.open(os.path.join(self.mp3d_views_file, scan ,k ,str(v)+'.jpg')).convert("RGB")
             return image
         else:
             for source in cand_view_source_list:
-                [(k,v)]=source.items()
-                images.append(self.mp3d_views_file[scan+'_'+k][v])
+                [(k, v)] = source.items()
+                images.append(self.mp3d_views_file[scan + "_" + k][v])
                 # image = Image.open(os.path.join(self.mp3d_views_file, scan ,k ,str(v)+'.jpg')).convert("RGB")
                 # images.append(np.array(image))
-                
+
             image = cv2.hconcat(images)
             return image
-            # return Image.fromarray(image).convert("RGB") 
+            # return Image.fromarray(image).convert("RGB")
 
-
-    def get_cand_view_imgs_scalvln(self,scan_candvpid,item_id):
-        scan = scan_candvpid.split('_')[0]
-        candvpid = scan_candvpid.split('_')[1]
+    def get_cand_view_imgs_scalvln(self, scan_candvpid, item_id):
+        scan = scan_candvpid.split("_")[0]
+        candvpid = scan_candvpid.split("_")[1]
         cand_view_source_list = self.cand_viewids_list[item_id]["cand_viewids"][candvpid]
         images = []
-        if len(cand_view_source_list)<2:
-            [(k,v)]=cand_view_source_list[0].items()
+        if len(cand_view_source_list) < 2:
+            [(k, v)] = cand_view_source_list[0].items()
             # image = self.views_file[scan+'_'+k][v]
-            image = Image.open(os.path.join(self.hm3d_views_file, scan ,k ,str(v)+'.jpg')).convert("RGB")
-            
+            image = Image.open(os.path.join(self.hm3d_views_file, scan, k, str(v) + ".jpg")).convert("RGB")
+
             return image
         else:
             for source in cand_view_source_list:
-                [(k,v)]=source.items()
+                [(k, v)] = source.items()
                 # images.append(self.views_file[scan+'_'+k][v])
-                image = Image.open(os.path.join(self.hm3d_views_file, scan ,k ,str(v)+'.jpg')).convert("RGB")
+                image = Image.open(os.path.join(self.hm3d_views_file, scan, k, str(v) + ".jpg")).convert("RGB")
                 images.append(np.array(image))
-                
+
             image = cv2.hconcat(images)
             # for idx ,view in enumerate(images):
             #     if idx == 0:
             #         image = view
             #     else:
             #         image = np.concatenate((image,view),axis=1)
-            return Image.fromarray(image).convert("RGB")   
+            return Image.fromarray(image).convert("RGB")
 
     # def process_image(self, image_file, overwrite_image_aspect_ratio=None ,item_id=None):
     #     image_folder = self.data_args.image_folder
@@ -1325,7 +1351,7 @@ class LazySupervisedDataset(Dataset):
     #         except Exception as exn:
     #             print(f"Failed to open image {image_file}. Exception:", exn)
     #             raise exn
-    def process_image(self, image_file, overwrite_image_aspect_ratio=None ,item_id=None):
+    def process_image(self, image_file, overwrite_image_aspect_ratio=None, item_id=None):
         image_folder = self.data_args.image_folder
         processor = self.data_args.image_processor
         # print(f"\n\nInspecting the image path, folder = {image_folder}, image={image_file}\n\n")
@@ -1340,17 +1366,16 @@ class LazySupervisedDataset(Dataset):
                 raise exn
         else:
             try:
-                if '-' in item_id.lower():
-                    image_raw=self.get_cand_view_imgs_scalvln(image_file,item_id)#sclavln
-                    image =  image_raw #sclavln
-                else :
-                    image_raw=self.get_cand_view_imgs(image_file,item_id)
+                if "-" in item_id.lower():
+                    image_raw = self.get_cand_view_imgs_scalvln(image_file, item_id)  # sclavln
+                    image = image_raw  # sclavln
+                else:
+                    image_raw = self.get_cand_view_imgs(image_file, item_id)
                     image = Image.fromarray(image_raw).convert("RGB")
                     # image =  image_raw
             except Exception as exn:
                 print(f"Failed to open image {image_file}. Exception:", exn)
-                raise exn             
-
+                raise exn
 
         image_size = image.size
         image_aspect_ratio = self.data_args.image_aspect_ratio
@@ -1421,13 +1446,13 @@ class LazySupervisedDataset(Dataset):
         if isinstance(i, int):
             sources = [sources]
         assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
-        
+
         if "image" in sources[0]:
             image_file = self.list_data_dict[i]["image"]
             if type(image_file) is list:
                 image = [self.process_image(f) for f in image_file]
                 # Handling multi images
-                # overwrite to process with simple pad 
+                # overwrite to process with simple pad
                 if len(image_file) > 1:
                     image = [self.process_image(f, "pad") for f in image_file]
                     image = [[im[0], im[1], "image"] for im in image]
@@ -1445,7 +1470,11 @@ class LazySupervisedDataset(Dataset):
 
             try:
                 if "shareVideoGPTV" in video_file:
-                    frame_files = [os.path.join(video_file, f) for f in os.listdir(video_file) if os.path.isfile(os.path.join(video_file, f))]
+                    frame_files = [
+                        os.path.join(video_file, f)
+                        for f in os.listdir(video_file)
+                        if os.path.isfile(os.path.join(video_file, f))
+                    ]
                     frame_files.sort()  # Ensure the frames are sorted if they are named sequentially
 
                     # TODO: Hard CODE: Determine the indices for uniformly sampling 10 frames
@@ -1455,12 +1484,11 @@ class LazySupervisedDataset(Dataset):
                         num_frames_to_sample = 10
 
                     avg_fps = 2
-                    
+
                     total_frames = len(frame_files)
                     sampled_indices = np.linspace(0, total_frames - 1, num_frames_to_sample, dtype=int)
 
-
-                    frame_time = [i/2 for i in sampled_indices]
+                    frame_time = [i / 2 for i in sampled_indices]
                     frame_time = ",".join([f"{i:.2f}s" for i in frame_time])
 
                     video_time = total_frames / avg_fps
@@ -1476,13 +1504,17 @@ class LazySupervisedDataset(Dataset):
                         except IOError:
                             print(f"Failed to read frame at path: {frame_path}")
                 else:
-                    video, video_time, frame_time, num_frames_to_sample = process_video_with_decord(video_file, self.data_args)
+                    video, video_time, frame_time, num_frames_to_sample = process_video_with_decord(
+                        video_file, self.data_args
+                    )
 
                 processor = self.data_args.image_processor
                 image = processor.preprocess(video, return_tensors="pt")["pixel_values"]
                 if self.data_args.add_time_instruction:
                     time_instruciton = f"The video lasts for {video_time:.2f} seconds, and {num_frames_to_sample} frames are uniformly sampled from it. These frames are located at {frame_time}.Please answer the following questions related to this video."
-                    sources[0]["conversations"][0]["value"] = f'{DEFAULT_IMAGE_TOKEN}\n{time_instruciton}\n{sources[0]["conversations"][0]["value"].replace(DEFAULT_IMAGE_TOKEN, "")}'
+                    sources[0]["conversations"][0]["value"] = (
+                        f"{DEFAULT_IMAGE_TOKEN}\n{time_instruciton}\n{sources[0]['conversations'][0]['value'].replace(DEFAULT_IMAGE_TOKEN, '')}"
+                    )
                 image = [(image, video[0].size, "video")]
                 sources = preprocess_multimodal(copy.deepcopy([e["conversations"] for e in sources]), self.data_args)
                 # print(sources)
@@ -1513,7 +1545,11 @@ class LazySupervisedDataset(Dataset):
             # image does not exist in the data, but the model is multimodal
             crop_size = self.data_args.image_processor.crop_size
             data_dict["image"] = [
-                (torch.zeros(1, 3, crop_size["height"], crop_size["width"]), (crop_size["width"], crop_size["height"]), "text"),
+                (
+                    torch.zeros(1, 3, crop_size["height"], crop_size["width"]),
+                    (crop_size["width"], crop_size["height"]),
+                    "text",
+                ),
             ]
         # prompt exist in the data
         if prompt is not None:
@@ -1532,18 +1568,17 @@ class LazySupervisedDataset(Dataset):
 
         if "image" in sources[0]:
             image_file = self.list_data_dict[i]["image"]
-            if ('matterport' in image_file[0]) or ('r2r' in image_file[0]) or ('rxr' in image_file[0]):
-
-                item_id = sources[0]['id']
+            if ("matterport" in image_file[0]) or ("r2r" in image_file[0]) or ("rxr" in image_file[0]):
+                item_id = sources[0]["id"]
             else:
                 item_id = None
 
             if type(image_file) is list:
-                image = [self.process_image(f,item_id=item_id) for f in image_file]
+                image = [self.process_image(f, item_id=item_id) for f in image_file]
                 # Handling multi images
-                # overwrite to process with simple pad 
+                # overwrite to process with simple pad
                 if len(image_file) > 1:
-                    image = [self.process_image(f, "pad",item_id=item_id) for f in image_file]
+                    image = [self.process_image(f, "pad", item_id=item_id) for f in image_file]
                     image = [[im[0], im[1], "image"] for im in image]
             else:
                 image = [self.process_image(image_file)]
@@ -1560,7 +1595,11 @@ class LazySupervisedDataset(Dataset):
 
             try:
                 if "shareVideoGPTV" in video_file:
-                    frame_files = [os.path.join(video_file, f) for f in os.listdir(video_file) if os.path.isfile(os.path.join(video_file, f))]
+                    frame_files = [
+                        os.path.join(video_file, f)
+                        for f in os.listdir(video_file)
+                        if os.path.isfile(os.path.join(video_file, f))
+                    ]
                     frame_files.sort()  # Ensure the frames are sorted if they are named sequentially
 
                     # TODO: Hard CODE: Determine the indices for uniformly sampling 10 frames
@@ -1570,12 +1609,11 @@ class LazySupervisedDataset(Dataset):
                         num_frames_to_sample = 10
 
                     avg_fps = 2
-                    
+
                     total_frames = len(frame_files)
                     sampled_indices = np.linspace(0, total_frames - 1, num_frames_to_sample, dtype=int)
 
-
-                    frame_time = [i/2 for i in sampled_indices]
+                    frame_time = [i / 2 for i in sampled_indices]
                     frame_time = ",".join([f"{i:.2f}s" for i in frame_time])
 
                     video_time = total_frames / avg_fps
@@ -1591,13 +1629,17 @@ class LazySupervisedDataset(Dataset):
                         except IOError:
                             print(f"Failed to read frame at path: {frame_path}")
                 else:
-                    video, video_time, frame_time, num_frames_to_sample = process_video_with_decord(video_file, self.data_args)
+                    video, video_time, frame_time, num_frames_to_sample = process_video_with_decord(
+                        video_file, self.data_args
+                    )
 
                 processor = self.data_args.image_processor
                 image = processor.preprocess(video, return_tensors="pt")["pixel_values"]
                 if self.data_args.add_time_instruction:
                     time_instruciton = f"The video lasts for {video_time:.2f} seconds, and {num_frames_to_sample} frames are uniformly sampled from it. These frames are located at {frame_time}.Please answer the following questions related to this video."
-                    sources[0]["conversations"][0]["value"] = f'{DEFAULT_IMAGE_TOKEN}\n{time_instruciton}\n{sources[0]["conversations"][0]["value"].replace(DEFAULT_IMAGE_TOKEN, "")}'
+                    sources[0]["conversations"][0]["value"] = (
+                        f"{DEFAULT_IMAGE_TOKEN}\n{time_instruciton}\n{sources[0]['conversations'][0]['value'].replace(DEFAULT_IMAGE_TOKEN, '')}"
+                    )
                 image = [(image, video[0].size, "video")]
                 sources = preprocess_multimodal(copy.deepcopy([e["conversations"] for e in sources]), self.data_args)
                 # print(sources)
@@ -1628,31 +1670,34 @@ class LazySupervisedDataset(Dataset):
             # image does not exist in the data, but the model is multimodal
             crop_size = self.data_args.image_processor.crop_size
             data_dict["image"] = [
-                (torch.zeros(1, 3, crop_size["height"], crop_size["width"]), (crop_size["width"], crop_size["height"]), "text"),
+                (
+                    torch.zeros(1, 3, crop_size["height"], crop_size["width"]),
+                    (crop_size["width"], crop_size["height"]),
+                    "text",
+                ),
             ]
         # prompt exist in the data
         if prompt is not None:
             data_dict["prompt"] = prompt
         try:
-            data_dict["id"] = self.list_data_dict[i].get('id' ,i)
+            data_dict["id"] = self.list_data_dict[i].get("id", i)
         except:
-            data_dict["id"] = self.list_data_dict[i].get('sample_id' ,i)
-        
+            data_dict["id"] = self.list_data_dict[i].get("sample_id", i)
+
         data_dict["nav_data"] = None
         if is_video:
- 
             # N = 2
             # dist_pairs = np.zeros((N, N), dtype=np.float32)
             data_dict["nav_data"] = None
         else:
-            if 'matterport_skybox_images' in image_file[0]:
-                try:  
-                    #nav
+            if "matterport_skybox_images" in image_file[0]:
+                try:
+                    # nav
                     dist_pairs = self.precompute_dist_pairs[data_dict["id"]][...]
 
                     data_dict["nav_data"] = dist_pairs
                 except:
-                    #gen
+                    # gen
                     # N = len(image_file) + 1
                     # dist_pairs = np.zeros((N, N), dtype=np.float32)
                     data_dict["nav_data"] = None
@@ -1661,11 +1706,8 @@ class LazySupervisedDataset(Dataset):
                 # N = len(image_file) + 1
                 # dist_pairs = np.zeros((N, N), dtype=np.float32)
                 data_dict["nav_data"] = None
-        
-            
+
         return data_dict
-
-
 
 
 @dataclass
@@ -1689,10 +1731,14 @@ class DataCollatorForSupervisedDataset(object):
         labels = [_labels[: self.tokenizer.model_max_length] for _labels in labels]
         if self.tokenizer.pad_token_id is None:
             # self.tokenizer.pad_token_id = self.tokenizer.eos_token_id  # FIXME: this could only be triggered for llama3 model.
-            self.tokenizer.pad_token_id = 0 # This gets the best result. Don't know why.
+            self.tokenizer.pad_token_id = 0  # This gets the best result. Don't know why.
         input_ids = self.pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
         labels = self.pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX)
-        batch = dict(input_ids=input_ids, labels=labels.long() if labels.dtype == torch.int32 else labels, attention_mask=input_ids.ne(self.tokenizer.pad_token_id))
+        batch = dict(
+            input_ids=input_ids,
+            labels=labels.long() if labels.dtype == torch.int32 else labels,
+            attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
+        )
         # batch = dict(input_ids=input_ids, labels=labels, attention_mask=input_ids.ne(self.tokenizer.pad_token_id), ids=ids)
 
         if "image" in instances[0]:
@@ -1702,20 +1748,20 @@ class DataCollatorForSupervisedDataset(object):
             batch["modalities"] = [im[2] for im_list in images for im in im_list]
             images = [im[0] for im_list in images for im in im_list]
             nav_datas = []
-            for  instance in instances:
+            for instance in instances:
                 try:
                     nav_datas.append(instance["nav_data"])
                 except:
                     nav_datas.append(None)
-                    
+
             # try:
             #     nav_datas = [instance["nav_data"] for instance in instances]
             # except:
             #     nav_datas = [None for instance in instances]
             #     print("nav_data batch err")
             # if all(x is not None and x.shape == images[0].shape for x in images):
-                # Image: (N, P, C, H, W)
-                # Video: (N, F, C, H, W)
+            # Image: (N, P, C, H, W)
+            # Video: (N, F, C, H, W)
             #     batch["images"] = torch.stack(images)
             # else:
             batch["images"] = images
@@ -1723,7 +1769,7 @@ class DataCollatorForSupervisedDataset(object):
 
         if "prompt" in instances[0]:
             batch["prompts"] = [instance["prompt"] for instance in instances]
-        
+
         # nav_datas = []
         # for instance in instances:
         #     nav_datas.append(instance['nav_data'])
@@ -1732,48 +1778,47 @@ class DataCollatorForSupervisedDataset(object):
         # batch['nav_data']=nav_data_batch
 
         return batch
-    def sap_collate(self,inputs):
-        batch = {
-            k: [x[k] for x in inputs] for k in inputs[0].keys()
-        }
+
+    def sap_collate(self, inputs):
+        batch = {k: [x[k] for x in inputs] for k in inputs[0].keys()}
         # text batches
-        batch['txt_lens'] = torch.LongTensor([len(x) for x in batch['txt_ids']])
-        batch['txt_ids'] = pad_sequence(batch['txt_ids'], batch_first=True, padding_value=0)
+        batch["txt_lens"] = torch.LongTensor([len(x) for x in batch["txt_ids"]])
+        batch["txt_ids"] = pad_sequence(batch["txt_ids"], batch_first=True, padding_value=0)
 
         # trajectory batches: traj_cand_vpids, traj_vpids
-        batch['traj_step_lens'] = [len(x) for x in batch['traj_view_img_fts']]
-        batch['traj_vp_view_lens'] = torch.LongTensor(
-            sum([[len(y) for y in x] for x in batch['traj_view_img_fts']], [])
+        batch["traj_step_lens"] = [len(x) for x in batch["traj_view_img_fts"]]
+        batch["traj_vp_view_lens"] = torch.LongTensor(
+            sum([[len(y) for y in x] for x in batch["traj_view_img_fts"]], [])
         )
-        batch['traj_view_img_fts'] = pad_tensors(sum(batch['traj_view_img_fts'], []))
-        batch['traj_view_dep_fts'] = pad_tensors(sum(batch['traj_view_dep_fts'], []))
-        if 'traj_obj_img_fts' in batch:
-            batch['traj_vp_obj_lens'] = torch.LongTensor(
-                sum([[len(y) for y in x] for x in batch['traj_obj_img_fts']], [])
+        batch["traj_view_img_fts"] = pad_tensors(sum(batch["traj_view_img_fts"], []))
+        batch["traj_view_dep_fts"] = pad_tensors(sum(batch["traj_view_dep_fts"], []))
+        if "traj_obj_img_fts" in batch:
+            batch["traj_vp_obj_lens"] = torch.LongTensor(
+                sum([[len(y) for y in x] for x in batch["traj_obj_img_fts"]], [])
             )
-            batch['traj_obj_img_fts'] = pad_tensors(sum(batch['traj_obj_img_fts'], []))
-        batch['traj_loc_fts'] = pad_tensors(sum(batch['traj_loc_fts'], []))
-        batch['traj_nav_types'] = pad_sequence(sum(batch['traj_nav_types'], []), batch_first=True, padding_value=0)
+            batch["traj_obj_img_fts"] = pad_tensors(sum(batch["traj_obj_img_fts"], []))
+        batch["traj_loc_fts"] = pad_tensors(sum(batch["traj_loc_fts"], []))
+        batch["traj_nav_types"] = pad_sequence(sum(batch["traj_nav_types"], []), batch_first=True, padding_value=0)
 
         # gmap batches: gmap_vpids
-        batch['gmap_lens'] = torch.LongTensor([len(x) for x in batch['gmap_step_ids']]) # included [stop]
-        batch['gmap_step_ids'] = pad_sequence(batch['gmap_step_ids'], batch_first=True, padding_value=0)
-        batch['gmap_visited_masks'] = pad_sequence(batch['gmap_visited_masks'], batch_first=True, padding_value=0)
-        batch['gmap_pos_fts'] = pad_tensors(batch['gmap_pos_fts'])
-        max_gmap_len = max(batch['gmap_lens'])
-        batch_size = len(batch['gmap_lens'])
+        batch["gmap_lens"] = torch.LongTensor([len(x) for x in batch["gmap_step_ids"]])  # included [stop]
+        batch["gmap_step_ids"] = pad_sequence(batch["gmap_step_ids"], batch_first=True, padding_value=0)
+        batch["gmap_visited_masks"] = pad_sequence(batch["gmap_visited_masks"], batch_first=True, padding_value=0)
+        batch["gmap_pos_fts"] = pad_tensors(batch["gmap_pos_fts"])
+        max_gmap_len = max(batch["gmap_lens"])
+        batch_size = len(batch["gmap_lens"])
         gmap_pair_dists = torch.zeros(batch_size, max_gmap_len, max_gmap_len).float()
         for i in range(batch_size):
-            gmap_pair_dists[i, :batch['gmap_lens'][i], :batch['gmap_lens'][i]] = batch['gmap_pair_dists'][i]
-        batch['gmap_pair_dists'] = gmap_pair_dists
+            gmap_pair_dists[i, : batch["gmap_lens"][i], : batch["gmap_lens"][i]] = batch["gmap_pair_dists"][i]
+        batch["gmap_pair_dists"] = gmap_pair_dists
 
         # vp batches: vp_angles
         # batch['vp_lens'] = torch.LongTensor([len(x[-1]) for x in batch['vp_pos_fts']])  # included [stop]
         # batch['vp_pos_fts'] = pad_tensors(batch['vp_pos_fts'])
 
         # action labels
-        batch['local_act_labels'] = torch.LongTensor(batch['local_act_labels'])
-        batch['global_act_labels'] = torch.LongTensor(batch['global_act_labels'])
+        batch["local_act_labels"] = torch.LongTensor(batch["local_act_labels"])
+        batch["global_act_labels"] = torch.LongTensor(batch["global_act_labels"])
         return batch
 
 
@@ -1818,13 +1863,20 @@ def get_model(model_args, training_args, bnb_model_from_pretrained_args):
         if training_args.model_max_length is None:
             training_args.model_max_length = cfg_pretrained.max_position_embeddings * model_args.rope_scaling_factor
             overwrite_config["max_sequence_length"] = training_args.model_max_length
-        assert training_args.model_max_length == int(cfg_pretrained.max_position_embeddings * model_args.rope_scaling_factor), print(
+        assert training_args.model_max_length == int(
+            cfg_pretrained.max_position_embeddings * model_args.rope_scaling_factor
+        ), print(
             f"model_max_length: {training_args.model_max_length}, max_position_embeddings: {cfg_pretrained.max_position_embeddings}, rope_scaling_factor: {model_args.rope_scaling_factor}"
         )
         # overwrite_config["max_sequence_length"] = model_args.max_sequence_length
         # overwrite_config["tokenizer_model_max_length"] = model_args.tokenizer_model_max_length
 
-    if model_args.mm_spatial_pool_stride is not None and model_args.mm_spatial_pool_out_channels is not None and model_args.mm_spatial_pool_mode is not None and model_args.mm_resampler_type is not None:
+    if (
+        model_args.mm_spatial_pool_stride is not None
+        and model_args.mm_spatial_pool_out_channels is not None
+        and model_args.mm_spatial_pool_mode is not None
+        and model_args.mm_resampler_type is not None
+    ):
         overwrite_config["mm_resampler_type"] = model_args.mm_resampler_type
         overwrite_config["mm_spatial_pool_stride"] = model_args.mm_spatial_pool_stride
         overwrite_config["mm_spatial_pool_out_channels"] = model_args.mm_spatial_pool_out_channels
@@ -1943,8 +1995,8 @@ def train(attn_implementation=None):
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    if training_args.verbose_logging: #not in
-        rank0_print(f"Inspecting experiment hyperparameters:\n")
+    if training_args.verbose_logging:  # not in
+        rank0_print("Inspecting experiment hyperparameters:\n")
         rank0_print(f"model_args = {vars(model_args)}\n\n")
         rank0_print(f"data_args = {vars(data_args)}\n\n")
         rank0_print(f"training_args = {vars(training_args)}\n\n")
@@ -1954,7 +2006,7 @@ def train(attn_implementation=None):
     compute_dtype = torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32)
 
     bnb_model_from_pretrained_args = {}
-    if training_args.bits in [4, 8]: #not in 
+    if training_args.bits in [4, 8]:  # not in
         from transformers import BitsAndBytesConfig
 
         bnb_model_from_pretrained_args.update(
@@ -1976,8 +2028,6 @@ def train(attn_implementation=None):
 
     model = get_model(model_args, training_args, bnb_model_from_pretrained_args)
 
-
-
     # model_config_file="llava_nav/pretrain_src/run_pt/r2r_model_config_dep.json"
     # model_config = PretrainedConfig.from_json_file(model_config_file)
     # model_config.pretrain_tasks = []
@@ -1988,32 +2038,30 @@ def train(attn_implementation=None):
     # for name, param in model.get_model().graph_projector.parameters():
     #     print(f"{name}: {param.shape}")
 
-    
     # for p in model.get_model().graph_encoder.parameters():
     #     print(p)
     #     p.requires_grad = True
 
-
-
-
     model.config.use_cache = False
-    if model_args.rope_scaling_factor is not None and model_args.rope_scaling_type is not None: #not in
+    if model_args.rope_scaling_factor is not None and model_args.rope_scaling_type is not None:  # not in
         model.config.rope_scaling = {
             "factor": model_args.rope_scaling_factor,
             "type": model_args.rope_scaling_type,
         }
 
-    if model_args.freeze_backbone: #not in
+    if model_args.freeze_backbone:  # not in
         model.model.requires_grad_(False)
 
-    if training_args.bits in [4, 8]: #not in
+    if training_args.bits in [4, 8]:  # not in
         from peft import prepare_model_for_kbit_training
 
-        model.config.torch_dtype = torch.float32 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32)
+        model.config.torch_dtype = (
+            torch.float32 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32)
+        )
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=training_args.gradient_checkpointing)
 
     if training_args.gradient_checkpointing:
-        if hasattr(model, "enable_input_require_grads"): #in
+        if hasattr(model, "enable_input_require_grads"):  # in
             model.enable_input_require_grads()
         else:
 
@@ -2041,10 +2089,24 @@ def train(attn_implementation=None):
         rank0_print("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
 
-    if "mistral" in model_args.model_name_or_path.lower() or "mixtral" in model_args.model_name_or_path.lower() or "zephyr" in model_args.model_name_or_path.lower():
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=training_args.cache_dir, model_max_length=training_args.model_max_length, padding_side="left")
-    elif "qwen" in model_args.model_name_or_path.lower():# in
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_args.model_name_or_path, cache_dir=training_args.cache_dir, model_max_length=training_args.model_max_length, padding_side="right")
+    if (
+        "mistral" in model_args.model_name_or_path.lower()
+        or "mixtral" in model_args.model_name_or_path.lower()
+        or "zephyr" in model_args.model_name_or_path.lower()
+    ):
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="left",
+        )
+    elif "qwen" in model_args.model_name_or_path.lower():  # in
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+        )
     elif (
         "wizardlm-2" in model_args.model_name_or_path.lower()
         or "vicuna" in model_args.model_name_or_path.lower()
@@ -2061,7 +2123,6 @@ def train(attn_implementation=None):
             use_fast=False,
         )
 
-
     tokenizer.add_tokens([NODE_BEGIIN_TOKEN], special_tokens=True)
     tokenizer.add_tokens([NODE_END_TOKEN], special_tokens=True)
     tokenizer.add_tokens([STOP_TOKEN], special_tokens=True)
@@ -2069,15 +2130,11 @@ def train(attn_implementation=None):
     tokenizer.add_tokens([NAV_INSTR_END_TOKEN], special_tokens=True)
     tokenizer.add_tokens([IDX_BEGIN_TOKEN], special_tokens=True)
     tokenizer.add_tokens([IDX_END_TOKEN], special_tokens=True)
-    # 创建从<1>到<50>的特殊标记列表
     # special_tokens = [f"<{i}>" for i in range(1, 51)]
-
-    # # 将所有标记添加到tokenizer中
     # num_added_tokens = tokenizer.add_tokens(special_tokens, special_tokens=True)
-    # print(f"添加了 {num_added_tokens} 个新的特殊标记")
 
     rank0_print(f"Prompt version: {model_args.version}")
-    if model_args.version == "v0": #not in
+    if model_args.version == "v0":  # not in
         if tokenizer.pad_token is None:
             smart_tokenizer_and_embedding_resize(
                 special_tokens_dict=dict(pad_token="[PAD]"),
@@ -2086,10 +2143,10 @@ def train(attn_implementation=None):
             )
     elif model_args.version == "v0.5":
         tokenizer.pad_token = tokenizer.unk_token
-    else: #in
+    else:  # in
         if tokenizer.unk_token is not None:
             tokenizer.pad_token = tokenizer.unk_token
-        if model_args.version in conversation_lib.conv_templates: #in
+        if model_args.version in conversation_lib.conv_templates:  # in
             conversation_lib.default_conversation = conversation_lib.conv_templates[model_args.version]
         else:
             conversation_lib.default_conversation = conversation_lib.conv_templates["vicuna_v1"]
@@ -2101,7 +2158,7 @@ def train(attn_implementation=None):
 
     if model_args.vision_tower is not None:
         model.get_model().initialize_vision_modules(model_args=model_args, fsdp=training_args.fsdp)
-        
+
         vision_tower = model.get_vision_tower()
         vision_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
 
@@ -2109,11 +2166,11 @@ def train(attn_implementation=None):
         data_args.is_multimodal = True
 
         model.config.image_aspect_ratio = data_args.image_aspect_ratio
-        if data_args.image_grid_pinpoints is not None: #in
+        if data_args.image_grid_pinpoints is not None:  # in
             if isinstance(data_args.image_grid_pinpoints, str) and "x" in data_args.image_grid_pinpoints:
                 try:
                     patch_size = data_args.image_processor.size[0]
-                except Exception as e:
+                except Exception:
                     patch_size = data_args.image_processor.size["shortest_edge"]
 
                 assert patch_size in [224, 336, 384, 448, 512], "patch_size should be in [224, 336, 384, 448, 512]"
@@ -2122,7 +2179,11 @@ def train(attn_implementation=None):
                 range_start = tuple(map(int, matches[0]))
                 range_end = tuple(map(int, matches[-1]))
                 # Generate a matrix of tuples from (range_start[0], range_start[1]) to (range_end[0], range_end[1])
-                grid_pinpoints = [(i, j) for i in range(range_start[0], range_end[0] + 1) for j in range(range_start[1], range_end[1] + 1)]
+                grid_pinpoints = [
+                    (i, j)
+                    for i in range(range_start[0], range_end[0] + 1)
+                    for j in range(range_start[1], range_end[1] + 1)
+                ]
                 # Multiply all elements by patch_size
                 data_args.image_grid_pinpoints = [[dim * patch_size for dim in pair] for pair in grid_pinpoints]
             elif isinstance(data_args.image_grid_pinpoints, str):
@@ -2138,12 +2199,14 @@ def train(attn_implementation=None):
         model.config.faster_token_stride = model_args.faster_token_stride
         model.config.add_time_instruction = data_args.add_time_instruction
         model.config.force_sample = data_args.force_sample
-        model.config.mm_spatial_pool_stride = model_args.mm_spatial_pool_stride 
+        model.config.mm_spatial_pool_stride = model_args.mm_spatial_pool_stride
 
         ### Deciding train which part of the model
         if model_args.mm_tunable_parts is None:  # traditional way of deciding which part to train
             model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
-            model.config.tune_mm_vision_resampler = training_args.tune_mm_vision_resampler = model_args.tune_mm_vision_resampler
+            model.config.tune_mm_vision_resampler = training_args.tune_mm_vision_resampler = (
+                model_args.tune_mm_vision_resampler
+            )
             if model_args.tune_mm_mlp_adapter or model_args.tune_mm_vision_resampler:
                 model.requires_grad_(False)
             if model_args.tune_mm_mlp_adapter:
@@ -2169,7 +2232,7 @@ def train(attn_implementation=None):
             else:
                 vision_tower.requires_grad_(False)
 
-        else: #in
+        else:  # in
             rank0_print(f"Using mm_tunable_parts: {model_args.mm_tunable_parts}")
             model.config.mm_tunable_parts = training_args.mm_tunable_parts = model_args.mm_tunable_parts
             # Set the entire model to not require gradients by default
@@ -2203,10 +2266,12 @@ def train(attn_implementation=None):
                         param.requires_grad_(True)
 
         total_params = sum(p.ds_numel if hasattr(p, "ds_numel") else p.numel() for p in model.parameters())
-        trainable_params = sum(p.ds_numel if hasattr(p, "ds_numel") else p.numel() for p in model.parameters() if p.requires_grad)
-        rank0_print(f"Total parameters: ~{total_params/1e6:.2f} MB)")
-        rank0_print(f"Trainable parameters: ~{trainable_params/1e6:.2f} MB)")
-        if training_args.bits in [4, 8]: #not in
+        trainable_params = sum(
+            p.ds_numel if hasattr(p, "ds_numel") else p.numel() for p in model.parameters() if p.requires_grad
+        )
+        rank0_print(f"Total parameters: ~{total_params / 1e6:.2f} MB)")
+        rank0_print(f"Trainable parameters: ~{trainable_params / 1e6:.2f} MB)")
+        if training_args.bits in [4, 8]:  # not in
             model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
 
         model.config.mm_use_im_start_end = data_args.mm_use_im_start_end = model_args.mm_use_im_start_end
@@ -2216,9 +2281,7 @@ def train(attn_implementation=None):
         model.config.mm_use_im_patch_token = model_args.mm_use_im_patch_token
         model.initialize_vision_tokenizer(model_args, tokenizer=tokenizer)
 
-
-
-    if training_args.bits in [4, 8]: #not in
+    if training_args.bits in [4, 8]:  # not in
         from peft.tuners.lora import LoraLayer
 
         for name, module in model.named_modules():
@@ -2231,7 +2294,6 @@ def train(attn_implementation=None):
                 if hasattr(module, "weight"):
                     if training_args.bf16 and module.weight.dtype == torch.float32:
                         module = module.to(torch.bfloat16)
-
 
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
     trainer = LLaVATrainer(model=model, tokenizer=tokenizer, args=training_args, **data_module)
@@ -2254,11 +2316,11 @@ def train(attn_implementation=None):
                 model.generation_config.save_pretrained(training_args.output_dir)
             model.save_pretrained(training_args.output_dir, state_dict=state_dict)
             torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, "non_lora_trainables.bin"))
-            if tokenizer is not None:  # 确保tokenizer变量在作用域内
+            if tokenizer is not None:
                 tokenizer.save_pretrained(training_args.output_dir)
     else:
         safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
-        if tokenizer is not None:  # 确保tokenizer变量在作用域内
+        if tokenizer is not None:
             tokenizer.save_pretrained(training_args.output_dir)
 
     rank0_print(f"Model saved to {training_args.output_dir}")

@@ -84,7 +84,7 @@ class R2RNavBatch(object):
         self, view_db, instr_data, connectivity_dir, 
         batch_size=64, angle_feat_size=4, seed=0, name=None, sel_data_idxs=None,
     ):
-        self.env = EnvBatch(connectivity_dir, feat_db=view_db, batch_size=batch_size,scan_data_dir="/root/liujiaxing/VLN-DUET/mp3d_data")
+        self.env = EnvBatch(connectivity_dir, feat_db=view_db, batch_size=batch_size,scan_data_dir=None)
         self.data = instr_data
         self.scans = set([x['scan'] for x in self.data])
         self.connectivity_dir = connectivity_dir

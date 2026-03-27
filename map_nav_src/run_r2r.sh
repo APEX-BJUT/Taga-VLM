@@ -1,4 +1,6 @@
-DATA_ROOT=/root/liujiaxing/tagavlm_infer/TagaVLM_infer_data
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+DATA_ROOT=${PROJECT_ROOT}/data
 
 train_alg=dagger
 
@@ -6,7 +8,7 @@ features=vitbase
 ft_dim=768
 obj_features=vitbase
 obj_ft_dim=768
-# /root/miniconda3/envs/llava-duet/lib/python3.9/site-packages
+
 ngpus=1
 seed=0
 
@@ -14,13 +16,13 @@ name=${train_alg}-${features}
 name=${name}-seed.${seed}
 name=${name}-init.aug.45k
 
-outdir=/root/liujiaxing/tagavlm_infer/map_nav_src/output/sample_trainer_test_epoch=3-sride=3-Scheduler-FSDP-2-20
+outdir=${SCRIPT_DIR}/output/eval_0.5b
 flag="--root_dir ${DATA_ROOT}
       --dataset r2r
       --output_dir ${outdir}
       --world_size ${ngpus}
       --seed ${seed}
-      --tokenizer bert      
+      --tokenizer bert
 
       --enc_full_graph
       --graph_sprels
@@ -28,11 +30,11 @@ flag="--root_dir ${DATA_ROOT}
 
       --expert_policy spl
       --train_alg ${train_alg}
-      
+
       --num_l_layers 9
       --num_x_layers 4
       --num_pano_layers 2
-      
+
       --max_action_len 15
       --max_instr_len 200
 
@@ -46,11 +48,11 @@ flag="--root_dir ${DATA_ROOT}
       --image_feat_size ${ft_dim}
       --angle_feat_size 4
 
-      --ml_weight 0.2   
+      --ml_weight 0.2
 
       --feat_dropout 0.4
       --dropout 0.5
-      
+
       --gamma 0."
 
 # train
@@ -60,6 +62,7 @@ flag="--root_dir ${DATA_ROOT}
 #       --eval_first
 
 # test
-CUDA_VISIBLE_DEVICES='2' python main_nav_llava.py $flag  \
+PYTHONPATH="${PROJECT_ROOT}:$PYTHONPATH" \
+CUDA_VISIBLE_DEVICES='1' uv run main_nav_llava.py $flag  \
       --tokenizer bert \
       --test --submit

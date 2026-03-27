@@ -1,100 +1,66 @@
-[tool.black]
-line-length = 240
-
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "llava"
-version = "1.7.0.dev0"
-description = "LLaVA OneVision: The Next Generation of LLaVA with Better Image and Video Understanding Capabilities"
-readme = "README.md"
-requires-python = ">=3.8"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: Apache Software License",
+name = "taga-vlm"
+version = "0.1.0"
+requires-python = ">=3.9,<3.12"
+dependencies = [
+    "torch>2.1.2,<2.10.0",
+    "torchvision>=0.16.2",
+    "transformers",
+    "tokenizers>=0.19,<0.20",
+    "accelerate>=0.29.1",
+    "einops>=0.6.1",
+    "einops-exts==0.0.4",
+    "sentencepiece>=0.1.99",
+    "numpy>=1.26.1",
+    "scipy",
+    "h5py>=3.14.0",
+    "opencv-python",
+    "open_clip_torch",
+    "timm",
+    "pydantic>=1.10.8",
+    "shortuuid",
+    "httpx>=0.24.0",
+    "ftfy",
+    "requests",
+    "urllib3<=2.0.0",
+    "hf_transfer",
+    "progressbar2>=4.5.0",
 ]
 
 [project.optional-dependencies]
-standalone = [
-    "shortuuid",
-    "httpx==0.24.0",
-    "einops",
-    "ftfy",
-]
-
-
 train = [
-    "llava[standalone]",
-    "numpy==1.26.1",
-    "open_clip_torch",
-    "fastapi",
-    "markdown2[all]",
-    "numpy",
-    "requests",
-    "sentencepiece",
-    "torch==2.1.2",
-    "torchvision==0.16.2",
-    "uvicorn",
+    "deepspeed>=0.14.4",
+    "peft>=0.4.0",
     "wandb",
-    "deepspeed==0.14.4",
-    "peft==0.4.0",
-    "accelerate>=0.29.1",
-    "tokenizers~=0.15.2",
-    "bitsandbytes==0.41.0",
-    "scikit-learn==1.2.2",
-    "sentencepiece~=0.1.99",
-    "einops==0.6.1",
-    "einops-exts==0.0.4",
-    "gradio_client==0.2.9",
-    "urllib3<=2.0.0",
-    "datasets==2.16.1",
-    "pydantic==1.10.8",
-    "timm",
-    "hf_transfer",
-    "opencv-python",
+    "bitsandbytes>=0.41.0",
+    "datasets>=2.16.1",
+    "scikit-learn>=1.2.2",
+    "tensorboardx>=2.6.4",
+    "gradio_client>=0.2.9",
+    "markdown2[all]",
+    "fastapi",
+    "uvicorn",
     "av",
     "decord",
     "tyro",
-    "scipy",
 ]
 
-[project.urls]
-"Homepage" = "https://llava-vl.github.io"
-"Bug Tracker" = "https://github.com/haotian-liu/LLaVA/issues"
+[tool.ruff]
+line-length = 120
+target-version = "py311"
 
-[tool.setuptools.packages.find]
-include = ["llava*", "trl*"]
-exclude = [
-    "assets*",
-    "benchmark*",
-    "docs",
-    "dist*",
-    "playground*",
-    "scripts*",
-    "tests*",
-    "checkpoints*",
-    "project_checkpoints*",
-    "debug_checkpoints*",
-    "mlx_configs*",
-    "wandb*",
-    "notebooks*",
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "E741",   # ambiguous variable name (l used in upstream code)
+    "F403",   # star imports (upstream pattern)
+    "F405",   # undefined from star imports
+    "E722",   # bare except (upstream pattern)
+    "F841",   # unused variable (upstream code)
+    "E402",   # module level import not at top
+    "F821",   # undefined name (upstream code)
 ]
 
-[tool.wheel]
-exclude = [
-    "assets*",
-    "benchmark*",
-    "docs",
-    "dist*",
-    "playground*",
-    "scripts*",
-    "tests*",
-    "checkpoints*",
-    "project_checkpoints*",
-    "debug_checkpoints*",
-    "mlx_configs*",
-    "wandb*",
-    "notebooks*",
-]
+[tool.uv.sources]
+transformers = { path = "transformers-4.40.0", editable = true }

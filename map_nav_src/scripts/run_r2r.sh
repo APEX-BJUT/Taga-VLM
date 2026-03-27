@@ -55,13 +55,13 @@ flag="--root_dir ${DATA_ROOT}
       --gamma 0."
 
 # # train
-# CUDA_VISIBLE_DEVICES='3' python main_nav_llava.py $flag  \
+# CUDA_VISIBLE_DEVICES='3' uv run main_nav_llava.py $flag  \
 #       --tokenizer bert \
 #       --bert_ckpt_file /root/liujiaxing/VLN-DUET/datasets/R2R/exprs_map/pretrain/cmt-vitbase-mlm.mrc.sap-init.lxmert-aug.speaker/ckpts/model_step_35000.pt \
 #       # --eval_first
 
 # test
-CUDA_VISIBLE_DEVICES='3' python main_nav_llava.py $flag  \
+CUDA_VISIBLE_DEVICES='3' uv run main_nav_llava.py $flag  \
       --tokenizer bert \
       --resume_file ../datasets/R2R/trained_models/best_val_unseen \
       --test --submit

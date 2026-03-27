@@ -1,0 +1,5 @@
+datasets:
+  - json_path: /hy-tmp/data/v7.1/llava_nav_instruct_train_v7.json
+    sampling_strategy: "first:100%"
+
+

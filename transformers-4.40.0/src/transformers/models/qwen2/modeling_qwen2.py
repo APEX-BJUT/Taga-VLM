@@ -320,7 +320,7 @@ class Qwen2Attention(nn.Module):
 class Qwen2GraphAttention(Qwen2Attention):
     def __init__(self, config: Qwen2Config, layer_idx: Optional[int] = None):
         super().__init__(config, layer_idx)
-        # 如果需要额外的图相关参数，可以在这里添加
+        # Graph structure projection
         if config.graph_sprels:
             self.sprel_linear = nn.Linear(1, 1)
             # self.sprel_linear = nn.Linear(1, self.num_heads)
@@ -336,13 +336,12 @@ class Qwen2GraphAttention(Qwen2Attention):
         past_key_value: Optional[Cache] = None,
         output_attentions: bool = False,
         use_cache: bool = False,
-        graph_sprels: Optional[torch.Tensor] = None,  # 新增参数
+        graph_sprels: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-        # 复用父类的大部分处理逻辑
         bsz, q_len, _ = hidden_states.size()
 
-        # 1. 计算 Q,K,V
+        # Compute Q, K, V
         query_states = self.q_proj(hidden_states)
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
@@ -351,7 +350,7 @@ class Qwen2GraphAttention(Qwen2Attention):
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
         value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
-        # 2. 位置编码处理
+        # Rotary position embedding
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
             if self.layer_idx is None:
@@ -368,48 +367,40 @@ class Qwen2GraphAttention(Qwen2Attention):
             cache_kwargs = {"sin": sin, "cos": cos}
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-        # 3. 处理 KV heads
+        # Repeat KV heads
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
 
-        # 4. 计算注意力分数
+        # Attention scores
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
 
-        # 5. 这里是关键修改点：添加图结构信息
+        # Add graph structure bias (STAR-Att)
         if graph_sprels is not None and self.sprel_linear is not None:
-                # 获取当前注意力矩阵的维度
             _, _, curr_q_len, curr_kv_len = attn_weights.shape
-            
-            # 获取图关系矩阵的原始维度
+
             orig_n = graph_sprels.shape[-1]
-            # 处理图的空间关系
+            # Spatial relation transform
             graph_sprels = graph_sprels.unsqueeze(1)# [batch_size, 1, n, n]
             graph_sprels = graph_sprels.unsqueeze(-1)# [batch_size, 1, n, n,1]
             graph_sprels = self.sprel_linear(graph_sprels)# [batch_size, 1, n, n, 1]
             graph_sprels = graph_sprels.squeeze(-1)#[batch_size, 1, n, n]
-                # 如果维度不匹配，动态调整graph_sprels
             if curr_q_len != orig_n or curr_kv_len != orig_n:
-                # 创建一个全零的tensor，大小与当前attn_weights匹配
+                # Pad to match current sequence length
                 aligned_sprels = torch.zeros(
                     (graph_sprels.shape[0], 1, curr_q_len, curr_kv_len),
                     dtype=graph_sprels.dtype,
                     device=graph_sprels.device
                 )
-                
-                # 将原始graph_sprels的有效部分复制到新tensor中
-                # 仅复制两个维度中较小的部分
+
                 valid_q_len = min(orig_n, curr_q_len)
                 valid_kv_len = min(orig_n, curr_kv_len)
                 aligned_sprels[:, :, :valid_q_len, :valid_kv_len] = graph_sprels[:, :, :valid_q_len, :valid_kv_len]
-        
-                # 使用对齐后的graph_sprels
+
                 graph_sprels = aligned_sprels
-            # 扩展头维度以匹配注意力头数
             # graph_sprels = graph_sprels.expand(-1, attn_weights.size(1), -1, -1)
-            # 添加到注意力分数中
             attn_weights = attn_weights + graph_sprels
 
-        # 6. 处理注意力掩码
+        # Apply attention mask
         if attention_mask is not None:
             if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
                 raise ValueError(
@@ -417,15 +408,12 @@ class Qwen2GraphAttention(Qwen2Attention):
                 )
             attn_weights = attn_weights + attention_mask
         if attention_mask is None:
-            # 创建因果掩码（下三角矩阵）
-            # 确保当前位置只能关注自己和之前的位置
+            # Build causal mask
             device = query_states.device
-            # 创建一个q_len x kv_seq_len的掩码
             causal_mask = torch.triu(
                 torch.ones((q_len, kv_seq_len), dtype=torch.bool, device=device),
                 diagonal=1
             )
-            # 将True转换为一个非常大的负数（掩码），False保持为0
             attention_mask = torch.zeros(
                 (bsz, 1, q_len, kv_seq_len),
                 dtype=query_states.dtype,
@@ -433,12 +421,12 @@ class Qwen2GraphAttention(Qwen2Attention):
             )
             attention_mask.masked_fill_(causal_mask.unsqueeze(0).unsqueeze(0), float("-inf"))
             attn_weights = attn_weights + attention_mask          
-        # 7. 计算最终的注意力输出
+        # Softmax + dropout + matmul
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
         attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
         attn_output = torch.matmul(attn_weights, value_states)
 
-        # 8. 重塑输出
+        # Reshape output
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
         attn_output = self.o_proj(attn_output)
@@ -450,7 +438,7 @@ class Qwen2GraphAttention(Qwen2Attention):
 class Qwen2MHGraphAttention(Qwen2Attention):
     def __init__(self, config: Qwen2Config, layer_idx: Optional[int] = None):
         super().__init__(config, layer_idx)
-        # 如果需要额外的图相关参数，可以在这里添加
+        # Graph structure projection
         if config.graph_sprels:
             # self.sprel_linear = nn.Linear(1, 1)
             self.sprel_linear = nn.Linear(1, self.num_heads)
@@ -466,13 +454,12 @@ class Qwen2MHGraphAttention(Qwen2Attention):
         past_key_value: Optional[Cache] = None,
         output_attentions: bool = False,
         use_cache: bool = False,
-        graph_sprels: Optional[torch.Tensor] = None,  # 新增参数
+        graph_sprels: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-        # 复用父类的大部分处理逻辑
         bsz, q_len, _ = hidden_states.size()
 
-        # 1. 计算 Q,K,V
+        # Compute Q, K, V
         query_states = self.q_proj(hidden_states)
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
@@ -481,7 +468,7 @@ class Qwen2MHGraphAttention(Qwen2Attention):
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
         value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
-        # 2. 位置编码处理
+        # Rotary position embedding
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
             if self.layer_idx is None:
@@ -498,55 +485,48 @@ class Qwen2MHGraphAttention(Qwen2Attention):
             cache_kwargs = {"sin": sin, "cos": cos}
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-        # 3. 处理 KV heads
+        # Repeat KV heads
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
 
-        # 4. 计算注意力分数
+        # Attention scores
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
 
-        # 5. 这里是关键修改点：添加图结构信息
+        # Add graph structure bias (STAR-Att)
         if graph_sprels is not None and self.sprel_linear is not None:
-            # 获取当前注意力矩阵的维度
             _, num_heads, curr_q_len, curr_kv_len = attn_weights.shape
-            
-            # 获取图关系矩阵的原始维度
+
             orig_n = graph_sprels.shape[-1]
             batch_size = graph_sprels.shape[0]
             
-            # 处理图的空间关系 [batch_size, n, n] -> [batch_size, n, n, 1]
+            # Spatial relation transform
             graph_sprels = graph_sprels.unsqueeze(-1)
             
-            # 线性变换，将每个关系值映射到对应每个注意力头的值
-            # 输入: [batch_size, n, n, 1]
-            # 输出: [batch_size, n, n, num_heads]
+            # Linear projection per head
             graph_sprels = self.sprel_linear(graph_sprels)
             
-            # 调整维度顺序，使注意力头维度在第二位
+            # Permute to [batch, heads, q, kv]
             # [batch_size, n, n, num_heads] -> [batch_size, num_heads, n, n]
             graph_sprels = graph_sprels.permute(0, 3, 1, 2)
             
-            # 确保维度匹配
+            # Align dimensions if needed
             if curr_q_len != orig_n or curr_kv_len != orig_n:
-                # 创建一个全零的tensor，大小与当前attn_weights匹配
+                # Pad to match current sequence length
                 aligned_sprels = torch.zeros(
                     (batch_size, num_heads, curr_q_len, curr_kv_len),
                     dtype=graph_sprels.dtype, 
                     device=graph_sprels.device
                 )
                 
-                # 将原始graph_sprels的有效部分复制到新tensor中
                 valid_q_len = min(orig_n, curr_q_len)
                 valid_kv_len = min(orig_n, curr_kv_len)
                 aligned_sprels[:, :, :valid_q_len, :valid_kv_len] = graph_sprels[:, :, :valid_q_len, :valid_kv_len]
                 
-                # 使用对齐后的graph_sprels
                 graph_sprels = aligned_sprels
     
-            # 直接添加到注意力分数中 - 现在每个注意力头都有自己的图关系权重
             attn_weights = attn_weights + graph_sprels
 
-        # 6. 处理注意力掩码
+        # Apply attention mask
         if attention_mask is not None:
             if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
                 raise ValueError(
@@ -554,15 +534,12 @@ class Qwen2MHGraphAttention(Qwen2Attention):
                 )
             attn_weights = attn_weights + attention_mask
         if attention_mask is None:
-            # 创建因果掩码（下三角矩阵）
-            # 确保当前位置只能关注自己和之前的位置
+            # Build causal mask
             device = query_states.device
-            # 创建一个q_len x kv_seq_len的掩码
             causal_mask = torch.triu(
                 torch.ones((q_len, kv_seq_len), dtype=torch.bool, device=device),
                 diagonal=1
             )
-            # 将True转换为一个非常大的负数（掩码），False保持为0
             attention_mask = torch.zeros(
                 (bsz, 1, q_len, kv_seq_len),
                 dtype=query_states.dtype,
@@ -570,12 +547,12 @@ class Qwen2MHGraphAttention(Qwen2Attention):
             )
             attention_mask.masked_fill_(causal_mask.unsqueeze(0).unsqueeze(0), float("-inf"))
             attn_weights = attn_weights + attention_mask          
-        # 7. 计算最终的注意力输出
+        # Softmax + dropout + matmul
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
         attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
         attn_output = torch.matmul(attn_weights, value_states)
 
-        # 8. 重塑输出
+        # Reshape output
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
         attn_output = self.o_proj(attn_output)
@@ -985,9 +962,14 @@ class Qwen2SdpaGraphAttention(Qwen2SdpaAttention):
     
     def __init__(self, config: Qwen2Config, layer_idx: Optional[int] = None):
         super().__init__(config, layer_idx)
-        # 添加图相关的线性变换层
+        # Graph structure projection
         if config.graph_sprels:
-            self.sprel_linear = nn.Linear(1, self.num_heads)
+            if config.graph_sprels_multihead:
+
+                self.sprel_linear = nn.Linear(1, self.num_heads)
+            else:
+
+                self.sprel_linear = nn.Linear(1, 1)
         else:
             self.sprel_linear = None
 
@@ -999,16 +981,15 @@ class Qwen2SdpaGraphAttention(Qwen2SdpaAttention):
         past_key_value: Optional[Cache] = None,
         output_attentions: bool = False,
         use_cache: bool = False,
-        graph_sprels: Optional[torch.Tensor] = None,  # 新增参数
+        graph_sprels: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         
-        # 如果需要输出注意力权重，则回退到父类的实现
+        # Fall back to eager attention if output_attentions needed
         if output_attentions:
             logger.warning_once(
                 "Qwen2Model is using Qwen2SdpaGraphAttention, but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to the manual attention implementation, "
                 'but specifying the manual implementation will be required from Transformers version v5.0.0 onwards. This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
             )
-            # 注意：这里需要确保父类也支持 graph_sprels 参数
             return super().forward(
                 hidden_states=hidden_states,
                 attention_mask=attention_mask,
@@ -1020,7 +1001,7 @@ class Qwen2SdpaGraphAttention(Qwen2SdpaAttention):
 
         bsz, q_len, _ = hidden_states.size()
 
-        # 计算 Q, K, V
+        # Compute Q, K, V
         query_states = self.q_proj(hidden_states)
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
@@ -1029,7 +1010,7 @@ class Qwen2SdpaGraphAttention(Qwen2SdpaAttention):
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
         value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
-        # 处理位置编码
+        # Rotary position embedding
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
             kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
@@ -1041,38 +1022,36 @@ class Qwen2SdpaGraphAttention(Qwen2SdpaAttention):
             cache_kwargs = {"sin": sin, "cos": cos}
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-        # 处理 KV heads
+        # Repeat KV heads
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
 
-        # 处理图结构信息
+        # Process graph structure
         graph_mask = None
         if graph_sprels is not None and self.sprel_linear is not None and len(graph_sprels) != 0:
-            # 获取图关系矩阵的维度
             orig_n = graph_sprels.shape[-1]
             batch_size = graph_sprels.shape[0]
             
-            # 处理图的空间关系 [batch_size, n, n] -> [batch_size, n, n, 1]
+            # Spatial relation transform
             graph_sprels = graph_sprels.unsqueeze(-1)
             
-            # 线性变换，将每个关系值映射到对应每个注意力头的值
+            # Linear projection per head
             # [batch_size, n, n, 1] -> [batch_size, n, n, num_heads]
             graph_sprels = self.sprel_linear(graph_sprels)
         
-            # 调整维度顺序，使注意力头维度在第二位
+            # Permute to [batch, heads, q, kv]
             # [batch_size, n, n, num_heads] -> [batch_size, num_heads, n, n]
             graph_sprels = graph_sprels.permute(0, 3, 1, 2)
             
-            # 确保维度匹配当前的序列长度
+            # Align dimensions if needed
             if q_len != orig_n or kv_seq_len != orig_n:
-                # 创建一个全零的tensor，大小与当前序列长度匹配
+                # Pad to match current sequence length
                 aligned_sprels = torch.zeros(
                     (batch_size, self.num_heads, q_len, kv_seq_len),
                     dtype=graph_sprels.dtype,
                     device=graph_sprels.device
                 )
                 
-                # 将原始graph_sprels的有效部分复制到新tensor中
                 valid_q_len = min(orig_n, q_len)
                 valid_kv_len = min(orig_n, kv_seq_len)
                 aligned_sprels[:, :, :valid_q_len, :valid_kv_len] = graph_sprels[:, :, :valid_q_len, :valid_kv_len]
@@ -1081,25 +1060,22 @@ class Qwen2SdpaGraphAttention(Qwen2SdpaAttention):
             else:
                 graph_mask = graph_sprels
         
-        # 构建最终的 combined_mask
-        # 修正原始 Qwen2MHGraphAttention 的逻辑
+        # Build combined attention mask
         combined_mask = None
         is_causal_flag = False
         
         if attention_mask is not None:
-            # 使用提供的 attention_mask（可能已包含因果掩码或其他掩码）
             combined_mask = attention_mask
-            # 扩展到 num_heads 维度（如果需要）
+            # Expand to num_heads dim
             if combined_mask.dim() == 4 and combined_mask.shape[1] == 1 and graph_mask is not None:
                 combined_mask = combined_mask.expand(-1, self.num_heads, -1, -1)
         elif attention_mask is None:
-            # 没有提供 attention_mask，检查是否需要因果掩码
             if self.is_causal and q_len > 1:
                 if graph_mask is None:
-                    # 只需要因果掩码，没有图掩码，让 SDPA 内部处理（最高效）
+                    # Let SDPA handle causal internally
                     is_causal_flag = True
                 else:
-                    # 需要因果掩码且有图掩码，必须显式创建因果掩码
+                    # Explicit causal mask needed with graph bias
                     causal_mask = torch.triu(
                         torch.ones((q_len, kv_seq_len), dtype=torch.bool, device=query_states.device),
                         diagonal=1
@@ -1111,18 +1087,18 @@ class Qwen2SdpaGraphAttention(Qwen2SdpaAttention):
                     )
                     combined_mask.masked_fill_(causal_mask.unsqueeze(0).unsqueeze(0), float("-inf"))
         
-        # 添加图掩码（如果有的话）
+        # Add graph bias
         if graph_mask is not None:
             if combined_mask is not None:
                 combined_mask = combined_mask + graph_mask
             else:
                 combined_mask = graph_mask
 
-        # 验证 mask 的维度
+        # Validate mask shape
         if combined_mask is not None:
             expected_shape = (bsz, self.num_heads, q_len, kv_seq_len)
             if combined_mask.shape[1] == 1:
-                # 如果是广播形式，保持不变
+                # Broadcast form, keep as-is
                 expected_shape = (bsz, 1, q_len, kv_seq_len)
             
             if combined_mask.size() != expected_shape:
@@ -1130,13 +1106,13 @@ class Qwen2SdpaGraphAttention(Qwen2SdpaAttention):
                     f"Attention mask should be of size {expected_shape}, but is {combined_mask.size()}"
                 )
 
-        # 确保连续性（SDPA 在 CUDA 上对非连续张量有 bug）
+        # Ensure contiguous for SDPA on CUDA
         if query_states.device.type == "cuda" and combined_mask is not None:
             query_states = query_states.contiguous()
             key_states = key_states.contiguous()
             value_states = value_states.contiguous()
 
-        # 使用 SDPA 进行注意力计算
+        # SDPA attention
         attn_output = torch.nn.functional.scaled_dot_product_attention(
             query_states,
             key_states,
@@ -1146,7 +1122,7 @@ class Qwen2SdpaGraphAttention(Qwen2SdpaAttention):
             is_causal=is_causal_flag,
         )
 
-        # 重塑输出
+        # Reshape output
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.view(bsz, q_len, self.hidden_size)
 
@@ -1242,14 +1218,14 @@ class Qwen2DecoderLayer(nn.Module): #add_graph
         super().__init__()
         self.hidden_size = config.hidden_size
         
-        # 确定使用的注意力类型
+        # Select attention implementation
         if hasattr(config, "use_graph_attention") and config.use_graph_attention:
             # if config._attn_implementation == "sdpa":
             self.self_attn = Qwen2SdpaGraphAttention(config, layer_idx)
             # else:
                 # self.self_attn = Qwen2GraphAttention(config, layer_idx)
         else:
-            # 保持原来的注意力机制
+            # Default attention
             # self.self_attn = QWEN2_ATTENTION_CLASSES[config._attn_implementation](config, layer_idx)
             self.self_attn = Qwen2SdpaAttention(config, layer_idx)
         
@@ -1265,7 +1241,7 @@ class Qwen2DecoderLayer(nn.Module): #add_graph
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
-        graph_sprels: Optional[torch.Tensor] = None,  # 添加图关系参数
+        graph_sprels: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         if "padding_mask" in kwargs:
@@ -1286,7 +1262,7 @@ class Qwen2DecoderLayer(nn.Module): #add_graph
             past_key_value=past_key_value,
             output_attentions=output_attentions,
             use_cache=use_cache,
-            graph_sprels=graph_sprels,  # 传递图关系参数
+            graph_sprels=graph_sprels,
             **kwargs,
         )
         hidden_states = residual + hidden_states
@@ -1650,7 +1626,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        graph_sprels: Optional[torch.Tensor] = None,  # 新增参数
+        graph_sprels: Optional[torch.Tensor] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
         Args:
