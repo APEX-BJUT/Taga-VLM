@@ -74,7 +74,7 @@ data_processing/
 
 flash_attn*.whl
 
-data/
+/data
 llava_nav/data/
 llava_nav/precompute_img_features/
 llava_nav/pretrain_src/
